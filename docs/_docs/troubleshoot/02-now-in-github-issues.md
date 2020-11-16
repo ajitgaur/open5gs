@@ -3,112 +3,234 @@ title: Now in the Github Issue
 head_inline: "<style> .blue { color: blue; } </style>"
 ---
 
+#### Cannot open shared object file when running daemon
+
+An error occurred when running as follows.
+
+```
+$ ./install/bin/open5gs-nrfd
+./install/bin/open5gs-nrfd: error while loading shared libraries: libogscrypt.so.2: cannot open shared object file: No such file or directory
+```
+
+You need to specify the absolute path to the shared library as follows.
+
+```bash
+$ echo $(cd $(dirname ./install/lib/x86_64-linux-gnu/) && pwd -P)/$(basename ./install/lib/x86_64-linux-gnu/)
+/home/acetcom/Documents/git/open5gs/install/lib/x86_64-linux-gnu
+$ export LD_LIBRARY_PATH=/home/acetcom/Documents/git/open5gs/install/lib/x86_64-linux-gnu
+$ ldd ./install/bin/open5gs-amfd
+...
+	libogsapp.so.1 => /home/acetcom/Documents/git/open5gs/install/lib/x86_64-linux-gnu/libogsapp.so.1 (0x00007f161ab51000)
+	libogscore.so.1 => /home/acetcom/Documents/git/open5gs/install/lib/x86_64-linux-gnu/libogscore.so.1 (0x00007f161a922000)
+	libogssctp.so.1 => /home/acetcom/Documents/git/open5gs/install/lib/x86_64-linux-gnu/libogssctp.so.1 (0x00007f161a71d000)
+	libogss1ap.so.1 => /home/acetcom/Documents/git/open5gs/install/lib/x86_64-linux-gnu/libogss1ap.so.1 (0x00007f161a519000)
+...
+```
+
+If you want to set the shared library path permanently, you can use ldconfig.
+```bash
+$ sudo sh -c "echo /home/acetcom/Documents/git/open5gs/install/lib/x86_64-linux-gnu > /etc/ld.so.conf.d/open5gs.conf"
+$ sudo ldconfig
+```
+
+#### Can I disable specific services if 5G functionally is not needed?
+
+
+From v2.0.x, SGW was divided into SGW-C and SGW-U, and PGW function was seperated into SMF and UPF.
+
+In order to use 4G only, you need to run the process below.
+```bash
+$ open5gs-mmed
+$ open5gs-sgwcd
+$ open5gs-smfd
+$ open5gs-sgwud
+$ open5gs-upfd
+$ open5gs-hssd
+$ open5gs-pcrfd
+```
+
+And the process below is only used in 5G, so there is no need to run it.
+
+```bash
+$ open5gs-nrfd
+$ open5gs-amfd
+$ open5gs-ausfd
+$ open5gs-udmd
+$ open5gs-udrd
+```
+
+However, among these, SMF and UPF are used by both 4G EPC and 5G Core. And SMF has a protocol stack to interact with 5G NRF. Therefore, if you run SMF without running 5G NRF, the following WARNING occurs in SMF.
+
+```
+10/08 14:44:03.045: [sbi] WARNING: [7] Failed to connect to ::1 port 7777: Connection refused (../lib/sbi/client.c:450)
+10/08 14:44:03.045: [smf] INFO: PFCP associated (../src/smf/pfcp-sm.c:174)
+10/08 14:44:03.046: [diam] INFO: CONNECTED TO 'pcrf.localdomain' (SCTP,soc#16): (../lib/diameter/common/logger.c:108)
+10/08 14:44:06.046: [smf] WARNING: [3c85dd06-0996-41eb-a985-476fa905aefc] Retry to registration with NRF (../src/smf/nf-sm.c:161)
+10/08 14:44:06.047: [sbi] WARNING: [7] Failed to connect to ::1 port 7777: Connection refused (../lib/sbi/client.c:450)
+```
+
+To prevent SMF from attempting to access the 5G NRF, you need to modify the SMF configuration file as below.
+
+```diff
+$ diff -u ./install/etc/open5gs/smf.yaml.old ./install/etc/open5gs/smf.yaml
+--- ./install/etc/open5gs/smf.yaml.old 2020-10-08 14:43:20.599734045 -0400
++++ ./install/etc/open5gs/smf.yaml 2020-10-08 14:44:21.864952687 -0400
+@@ -168,9 +168,9 @@
+ #      - ::1
+ #
+ smf:
+-    sbi:
+-      - addr: 127.0.0.4
+-        port: 7777
++#    sbi:
++#      - addr: 127.0.0.4
++#        port: 7777
+     gtpc:
+       - addr: 127.0.0.4
+       - addr: ::1
+@@ -214,12 +214,12 @@
+ #        - 127.0.0.10
+ #        - fe80::1%lo
+ #
+-nrf:
+-    sbi:
+-      - addr:
+-          - 127.0.0.10
+-          - ::1
+-        port: 7777
++#nrf:
++#    sbi:
++#      - addr:
++#          - 127.0.0.10
++#          - ::1
++#        port: 7777
+
+ #
+ # upf:
+```
+
+If you set as above and run SMF, you do not need to run NRF. Seven daemons operate in 4G only state.
+
+#### How to change UE IP Pool
+
+The Open5GS package contains a systemd-networkd configuration file for `ogstun`. Therefore, you must first modify the configuration file as follows.
+
+```diff
+$ diff -u /etc/systemd/network/99-open5gs.network /etc/systemd/network/99-open5gs.network.new
+--- /etc/systemd/network/99-open5gs.network	2020-09-17 09:29:09.137392040 -0400
++++ /etc/systemd/network/99-open5gs.network.new	2020-09-17 09:29:03.375719620 -0400
+@@ -2,5 +2,5 @@
+ Name=ogstun
+
+ [Network]
+-Address=10.45.0.1/16
++Address=10.46.0.1/16
+ Address=cafe::1/64
+```
+
+Restart systemd-networkd
+```
+$ sudo systemctl restart systemd-networkd
+```
+
+Now, you need to modify the configuration file of Open5GS to adjust the UE IP Pool. UE IP Pool can be allocated by SMF or UPF, but in this tutorial, we will modify both configuration files.
+
+```diff
+$ diff -u smf.yaml smf.yaml.new
+--- smf.yaml	2020-09-17 09:31:16.547882093 -0400
++++ smf.yaml.new	2020-09-17 09:32:18.267726844 -0400
+@@ -190,7 +190,7 @@
+       - addr: 127.0.0.4
+       - addr: ::1
+     pdn:
+-      - addr: 10.45.0.1/16
++      - addr: 10.46.0.1/16
+       - addr: cafe::1/64
+     dns:
+       - 8.8.8.8
+```
+
+```diff
+$ diff -u upf.yaml upf.yaml.new
+--- upf.yaml	2020-09-17 09:31:16.547882093 -0400
++++ upf.yaml.new	2020-09-17 09:32:25.199619989 -0400
+@@ -139,7 +139,7 @@
+     gtpu:
+       - addr: 127.0.0.7
+     pdn:
+-      - addr: 10.45.0.1/16
++      - addr: 10.46.0.1/16
+       - addr: cafe::1/64
+
+ #
+```
+
+Restart SMF/UPF
+```
+$ sudo systemctl restart open5gs-smfd.service
+$ sudo systemctl restart open5gs-upfd.service
+```
+
 #### Wireshark cannot decode NAS-5GS
 
 By default, wireshark cannot decode NAS-5GS message when the security header type is "Integrity protected and ciphered".
 
-![Wireshark cannot decode]({{ site.url }}{{ site.baseurl }}/assets/images/wireshark_cannot_decode_nas_5gs.png){: height="480" width="640"}
+![Wireshark cannot decode]({{ site.url }}{{ site.baseurl }}/assets/images/wireshark_cannot_decode_nas_5gs.png){: height="100%" width="100%"}
 
 You need to turn on "Try to detect and decode 5G-EA0 ciphered messages" in the wireshark perference menu.
 
-![Wireshark perference]({{ site.url }}{{ site.baseurl }}/assets/images/wireshark_preference.png){: height="480" width="640"}
+![Wireshark perference]({{ site.url }}{{ site.baseurl }}/assets/images/wireshark_preference.png){: height="100%" width="100%"}
 
 Now, you can see the NAS-5GS message in the wireshark.
 
-![Wireshark can decode]({{ site.url }}{{ site.baseurl }}/assets/images/wireshark_can_decode_nas_5gs.png){: height="480" width="640"}
+![Wireshark can decode]({{ site.url }}{{ site.baseurl }}/assets/images/wireshark_can_decode_nas_5gs.png){: height="100%" width="100%"}
 
 #### Test failed (e.g. `meson test -v`)
 
-Sometimes you may get a message like the one below due to a problem with the freeDiameter library.
+If MongoDB server is not started, you may get a message like this:
 
 ```
 $ meson test -v
 
 ...
- 5/10 open5gs:5gc / registration              OK       4.98 s
-s1setup-test        : SUCCESS
-guti-test           : SUCCESS
-auth-test           : SUCCESS
-idle-test           : SUCCESS
-emm-status-test     : SUCCESS
-reset-test          : SUCCESS
-ue-context-test     : SUCCESS
-All tests passed.
- 6/10 open5gs:epc / attach                    OK       4.68 s
-bearer-test         : SUCCESS
-session-test        : SUCCESS
-rx-test             : SUCCESS
-All tests passed.
- 7/10 open5gs:epc / volte                     OK       4.33 s
-
---- command ---
-08:06:31 /home/parallels/open5gs/build/tests/csfb/csfb
---- stdout ---
-csfb-test           :  ERROR: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:112 ROUTING ERROR 'No remaining suitable candidate to route the message to' for:  (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113      'Credit-Control-Request' (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113        Version: 0x01 (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113        Length: 20 (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113        Flags: 0xC0 (RP--) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113        Command Code: 272 (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113        ApplicationId: 16777238 (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113        Hop-by-Hop Identifier: 0x00000000 (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113        End-to-End Identifier: 0x2875502B (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         {internal data}: src:(nil)(0) rwb:(nil) rt:0 cb:0x564527642502,(nil)(0x7f71a86df418) qry:(nil) asso:0 sess:0x7f7158001140 (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Session-Id'(263) l=8 f=-M val="pgw.localdomain;1585209991;1;app_gx" (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Origin-Host'(264) l=8 f=-M val="pgw.localdomain" (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Origin-Realm'(296) l=8 f=-M val="localdomain" (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Destination-Realm'(283) l=8 f=-M val="localdomain" (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Auth-Application-Id'(258) l=12 f=-M val=16777238 (0x1000016) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'CC-Request-Type'(416) l=12 f=-M val='INITIAL_REQUEST' (1 (0x1)) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'CC-Request-Number'(415) l=12 f=-M val=0 (0x0) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Subscription-Id'(443) l=8 f=-M val=(grouped) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113            AVP: 'Subscription-Id-Type'(450) l=12 f=-M val='END_USER_IMSI' (1 (0x1)) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113            AVP: 'Subscription-Id-Data'(444) l=8 f=-M val="310014987654004" (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Supported-Features'(628) vend='3GPP'(10415) l=12 f=V- val=(grouped) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113            AVP: 'Feature-List-ID'(629) vend='3GPP'(10415) l=16 f=V- val=1 (0x1) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113            AVP: 'Feature-List'(630) vend='3GPP'(10415) l=16 f=V- val=11 (0xb) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Network-Request-Support'(1024) vend='3GPP'(10415) l=16 f=VM val=1 (0x1) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Framed-IP-Address'(8) l=8 f=-M val=<0A 2D 00 02> (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'IP-CAN-Type'(1027) vend='3GPP'(10415) l=16 f=VM val=5 (0x5) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'RAT-Type'(1032) vend='3GPP'(10415) l=16 f=V- val=1004 (0x3ec) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'QoS-Information'(1016) vend='3GPP'(10415) l=12 f=VM val=(grouped) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113            AVP: 'APN-Aggregate-Max-Bitrate-UL'(1041) vend='3GPP'(10415) l=16 f=V- val=1024000000 (0x3d090000) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113            AVP: 'APN-Aggregate-Max-Bitrate-DL'(1040) vend='3GPP'(10415) l=16 f=V- val=1024000000 (0x3d090000) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Default-EPS-Bearer-QoS'(1049) vend='3GPP'(10415) l=12 f=V- val=(grouped) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113            AVP: 'QoS-Class-Identifier'(1028) vend='3GPP'(10415) l=16 f=VM val=9 (0x9) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113            AVP: 'Allocation-Retention-Priority'(1034) vend='3GPP'(10415) l=12 f=V- val=(grouped) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113               AVP: 'Priority-Level'(1046) vend='3GPP'(10415) l=16 f=V- val=15 (0xf) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113               AVP: 'Pre-emption-Capability'(1047) vend='3GPP'(10415) l=16 f=V- val=1 (0x1) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113               AVP: 'Pre-emption-Vulnerability'(1048) vend='3GPP'(10415) l=16 f=V- val=0 (0x0) (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: '3GPP-User-Location-Info'(22) vend='3GPP'(10415) l=12 f=VM val=<82 13 00 41 00 33 13 00 41 08 D0 1B 78> (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: '3GPP-MS-TimeZone'(23) vend='3GPP'(10415) l=12 f=VM val=<23 00> (../lib/diameter/common/init.c:116)
-: ../subprojects/freeDiameter/extensions/dbg_msg_dumps/dbg_msg_dumps.c:113         AVP: 'Called-Station-Id'(30) l=8 f=-M val=<73 74 61 72 65 6E 74 2E 63 6F 6D> (../lib/diameter/common/init.c:116)
-: no_CC-Request-Number (../src/pgw/pgw-fd-path.c:505)
-/home/parallels/open5gs/build/src/pgw/../../lib/core/libogscore.so.1(ogs_abort+0x2e)[0x7f71abdbdbf8]
-/home/parallels/open5gs/build/src/pgw/open5gs-pgwd(+0x1cb8f)[0x564527642b8f]
-/home/parallels/open5gs/build/src/pgw/../../subprojects/freeDiameter/libfdcore/libfdcore.so.7(+0x492d7)[0x7f71ab7702d7]
-/home/parallels/open5gs/build/src/pgw/../../subprojects/freeDiameter/libfdcore/libfdcore.so.7(+0x4cb63)[0x7f71ab773b63]
-/home/parallels/open5gs/build/src/pgw/../../subprojects/freeDiameter/libfdcore/libfdcore.so.7(+0x4ccef)[0x7f71ab773cef]
-/lib/x86_64-linux-gnu/libpthread.so.0(+0x76db)[0x7f71aae686db]
-/lib/x86_64-linux-gnu/libc.so.6(clone+0x3f)[0x7f71aab9188f]
-03/26 16:06:43.674ERROR: GTP Timeout : IMSI[310014987654004] Message-Type[32] (../src/sgw/sgw-s11-handler.c:39)
-FAILED 1 of 1
-Failed Tests   		Total	Fail	Failed %
-===================================================
-csfb-test      		    1	   1	100.00%
---- stderr ---
-03/26 16:06:43.681: [ERROR: GTP Timeout : IMSI[310014987654004] Message-Type[32] (../src/mme/mme-gtp-path.c:110)
-Line 202: Condition is false, but expected true
--------
-
- 8/10 open5gs:epc / csfb                    FAIL    10.57 s (killed by signal 6 SIGABRT)
+4/10 open5gs:unit / unit OK 0.06 s
+09/30 01:12:37.829: [core] FATAL: test_5gc_init: Assertion ogs_dbi_init(ogs_app()->db_uri) == OGS_OK' failed. (../tests/app/5gc-init.c:100)
+09/30 01:12:37.830: [core] FATAL: backtrace() returned 8 addresses (../lib/core/ogs-abort.c:37)
+/home/open5gs/build/tests/registration/registration(+0x1bfd0) [0x55af96a05fd0]
+/home/open5gs/build/tests/registration/registration(+0x3c2e) [0x55af969edc2e]
+/home/open5gs/build/tests/registration/registration(+0x25151) [0x55af96a0f151]
+/home/open5gs/build/tests/registration/registration(+0x251a5) [0x55af96a0f1a5]
+/home/open5gs/build/tests/registration/registration(+0x3cde) [0x55af969edcde]
+/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xe7) [0x7f3c2bb97b97]
+/home/open5gs/build/tests/registration/registration(+0x39aa) [0x55af969ed9aa]
+5/10 open5gs:5gc / registration FAIL 0.27 s
+09/30 01:12:38.073: [core] FATAL: test_epc_init: Assertion ogs_dbi_init(ogs_app()->db_uri) == OGS_OK' failed. (../tests/app/epc-init.c:105)
+09/30 01:12:38.073: [core] FATAL: backtrace() returned 8 addresses (../lib/core/ogs-abort.c:37)
+/home/open5gs/build/tests/attach/attach(+0x12362) [0x55ef42081362]
+/home/open5gs/build/tests/attach/attach(+0x367e) [0x55ef4207267e]
+/home/open5gs/build/tests/attach/attach(+0x1b4e3) [0x55ef4208a4e3]
+/home/open5gs/build/tests/attach/attach(+0x1b537) [0x55ef4208a537]
+/home/open5gs/build/tests/attach/attach(+0x372e) [0x55ef4207272e]
+/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xe7) [0x7f10b2e30b97]
+/home/open5gs/build/tests/attach/attach(+0x33fa) [0x55ef420723fa]
+6/10 open5gs:epc / attach FAIL 0.17 s
+09/30 01:12:38.239: [core] FATAL: test_epc_init: Assertion `ogs_dbi_init(ogs_app()->db_uri) == OGS_OK' failed. (../tests/app/epc-init.c:105)
+09/30 01:12:38.239: [core] FATAL: backtrace() returned 8 addresses (../lib/core/ogs-abort.c:37)
+/home/open5gs/build/tests/volte/volte(+0x22272) [0x555df9643272]
+/home/open5gs/build/tests/volte/volte(+0x1210a) [0x555df963310a]
+/home/open5gs/build/tests/volte/volte(+0x2b3f3) [0x555df964c3f3]
+/home/open5gs/build/tests/volte/volte(+0x2b447) [0x555df964c447]
+/home/open5gs/build/tests/volte/volte(+0x12221) [0x555df9633221]
+/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0xe7) [0x7fd1df6b6b97]
+/home/open5gs/build/tests/volte/volte(+0x4daa) [0x555df9625daa]
+7/10 open5gs:epc / volte FAIL 0.17 s
 ...
 ```
 
-I cannot solve the problem exactly at this point.
+Please make sure that MongoDB server daemon is running.
 {: .blue}
 
-Remove all subscriber information using MongoDB Client
+Then, remove all subscriber information using MongoDB Client
 ```
 $ mongo
 > use open5gs
@@ -223,9 +345,6 @@ Unexpected Pass:       0
 Skipped:               0
 Timeout:               0
 ```
-
-**Note:** If your test result more than once is same as above, there should be no problem with code you modified.
-{: .notice--danger}
 
 #### Is it possible to setup IP/NAT table along with Docker?
 
@@ -504,11 +623,11 @@ You can start MongoDB using systemctl.
 $ sudo systemctl start mongodb
 ```
 
-#### I have some error when running `./build/test/attach/attach`
+#### I have some error when running `./build/tests/attach/attach`
 
-Did you see the following error after executing `./build/test/attach/attach`?
+Did you see the following error after executing `./build/tests/attach/attach`?
 ```bash
-$ ./build/test/epc/simple
+$ ./build/tests/attach/attach
 s1setup_test        : SUCCESS  
 attach_test         : -Line 134: Condition is false, but expected true  
 \04/09 15:49:09.285: [esm] FATAL: esm_handle_pdn_connectivity_request: Assertion `SECURITY_CONTEXT_IS_VALID(mme_ue)' failed. (esm_handler.c:29)  
@@ -534,9 +653,9 @@ $ sudo pkill -9 attach
 $ sudo pkill -9 open5gs-mmed ...
 ```
 
-Execute `./build/test/attach/attach`
+Execute `./build/tests/attach/attach`
 ```bash
-$ ./build/test/attach/attach
+$ ./build/tests/attach/attach
 ```
 
 #### My gNB/eNB does not support IPv6.

@@ -19,8 +19,6 @@
 
 #include "gtp-path.h"
 
-static ogs_pkbuf_pool_t *packet_pool = NULL;
-
 static void _gtpv2_c_recv_cb(short when, ogs_socket_t fd, void *data)
 {
     sgwc_event_t *e = NULL;
@@ -33,6 +31,7 @@ static void _gtpv2_c_recv_cb(short when, ogs_socket_t fd, void *data)
     ogs_assert(fd != INVALID_SOCKET);
 
     pkbuf = ogs_pkbuf_alloc(NULL, OGS_MAX_SDU_LEN);
+    ogs_assert(pkbuf);
     ogs_pkbuf_put(pkbuf, OGS_MAX_SDU_LEN);
 
     size = ogs_recvfrom(fd, pkbuf->data, pkbuf->len, 0, &from);
@@ -106,13 +105,6 @@ int sgwc_gtp_open(void)
     ogs_socknode_t *node = NULL;
     ogs_sock_t *sock = NULL;
 
-    ogs_pkbuf_config_t config;
-    memset(&config, 0, sizeof config);
-
-    config.cluster_8192_pool = ogs_app()->pool.packet;
-
-    packet_pool = ogs_pkbuf_pool_create(&config);
-
     ogs_list_for_each(&sgwc_self()->gtpc_list, node) {
         sock = ogs_gtp_server(node);
         ogs_assert(sock);
@@ -145,12 +137,36 @@ void sgwc_gtp_close(void)
 {
     ogs_socknode_remove_all(&sgwc_self()->gtpc_list);
     ogs_socknode_remove_all(&sgwc_self()->gtpc_list6);
+}
 
-    ogs_pkbuf_pool_destroy(packet_pool);
+static void bearer_timeout(ogs_gtp_xact_t *xact, void *data)
+{
+    sgwc_bearer_t *bearer = data;
+    sgwc_sess_t *sess = NULL;
+    sgwc_ue_t *sgwc_ue = NULL;
+    uint8_t type = 0;
+
+    ogs_assert(xact);
+    ogs_assert(bearer);
+    sess = bearer->sess;
+    ogs_assert(sess);
+    sgwc_ue = sess->sgwc_ue;
+    ogs_assert(sgwc_ue);
+
+    type = xact->seq[0].type;
+
+    switch (type) {
+    case OGS_GTP_DOWNLINK_DATA_NOTIFICATION_TYPE:
+        ogs_error("[%s] No Downlink Data Notification ACK", sgwc_ue->imsi_bcd);
+        break;
+    default:
+        ogs_error("GTP Timeout : IMSI[%s] Message-Type[%d]",
+                sgwc_ue->imsi_bcd, type);
+    }
 }
 
 void sgwc_gtp_send_downlink_data_notification(
-        sgwc_bearer_t *bearer, ogs_pfcp_xact_t *pfcp_xact)
+    uint8_t cause_value, sgwc_bearer_t *bearer)
 {
     int rv;
 
@@ -163,12 +179,12 @@ void sgwc_gtp_send_downlink_data_notification(
     ogs_gtp_header_t h;
 
     ogs_assert(bearer);
-    ogs_assert(pfcp_xact);
 
     sess = bearer->sess;
     ogs_assert(sess);
     sgwc_ue = bearer->sgwc_ue;
     ogs_assert(sgwc_ue);
+    ogs_assert(sgwc_ue->gnode);
 
     ogs_debug("Downlink Data Notification");
     ogs_debug("    MME_S11_TEID[%d] SGW_S11_TEID[%d]",
@@ -178,13 +194,12 @@ void sgwc_gtp_send_downlink_data_notification(
     h.type = OGS_GTP_DOWNLINK_DATA_NOTIFICATION_TYPE;
     h.teid = sgwc_ue->mme_s11_teid;
 
-    pkbuf = sgwc_s11_build_downlink_data_notification(bearer);
+    pkbuf = sgwc_s11_build_downlink_data_notification(cause_value, bearer);
     ogs_expect_or_return(pkbuf);
 
     gtp_xact = ogs_gtp_xact_local_create(
-            sgwc_ue->gnode, &h, pkbuf, NULL, sess);
+            sgwc_ue->gnode, &h, pkbuf, bearer_timeout, bearer);
     ogs_expect_or_return(gtp_xact);
-    gtp_xact->pfcp_xact = pfcp_xact;
 
     rv = ogs_gtp_xact_commit(gtp_xact);
     ogs_expect(rv == OGS_OK);

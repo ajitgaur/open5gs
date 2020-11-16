@@ -535,6 +535,7 @@ static void smf_gx_cca_cb(void *data, struct msg **msg)
     gxbuf_len = sizeof(ogs_diam_gx_message_t);
     ogs_assert(gxbuf_len < 8192);
     gxbuf = ogs_pkbuf_alloc(NULL, gxbuf_len);
+    ogs_assert(gxbuf);
     ogs_pkbuf_put(gxbuf, gxbuf_len);
     gx_message = (ogs_diam_gx_message_t *)gxbuf->data;
     ogs_assert(gx_message);
@@ -855,6 +856,7 @@ static int smf_gx_rar_cb( struct msg **msg, struct avp *avp,
     gxbuf_len = sizeof(ogs_diam_gx_message_t);
     ogs_assert(gxbuf_len < 8192);
     gxbuf = ogs_pkbuf_alloc(NULL, gxbuf_len);
+    ogs_assert(gxbuf);
     ogs_pkbuf_put(gxbuf, gxbuf_len);
     gx_message = (ogs_diam_gx_message_t *)gxbuf->data;
     ogs_assert(gx_message);
@@ -1041,6 +1043,9 @@ int smf_fd_init(void)
 {
     int ret;
 	struct disp_when data;
+    struct dict_object *gx_app, *vnd;
+    struct dict_vendor_data vnd_data;
+    struct dict_application_data gx_app_data;
 
     if (smf_self()->diam_conf_path == NULL &&
         (smf_self()->diam_config->cnf_diamid == NULL ||
@@ -1055,6 +1060,23 @@ int smf_fd_init(void)
 
     ret = ogs_diam_init(FD_MODE_CLIENT|FD_MODE_SERVER,
                 smf_self()->diam_conf_path, smf_self()->diam_config);
+    ogs_assert(ret == 0);
+
+    vnd_data.vendor_id = 10415;
+    vnd_data.vendor_name = (char *) "3GPP";
+
+    ret = fd_dict_new(fd_g_config->cnf_dict,
+            DICT_VENDOR, &vnd_data, NULL, &vnd);
+    ogs_assert(ret == 0);
+
+    gx_app_data.application_id = 16777238;
+    gx_app_data.application_name = (char *) "Gx";
+
+    ret = fd_dict_new(fd_g_config->cnf_dict, DICT_APPLICATION,
+            &gx_app_data, NULL, &gx_app);
+    ogs_assert(ret == 0);
+
+    ret = fd_disp_app_support(gx_app, vnd, 1, 0);
     ogs_assert(ret == 0);
 
 	/* Install objects definitions for this application */

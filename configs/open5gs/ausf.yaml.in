@@ -127,7 +127,7 @@ parameter:
 # max:
 #
 # o Maximum Number of UE per AMF/MME
-#    ue: 4,096
+#    ue: 1024
 # o Maximum Number of gNB/eNB per AMF/MME
 #    gnb: 32
 #
@@ -138,7 +138,7 @@ max:
 #
 # o The Number of Default Memory Pool Size
 #
-#   - Pool-size 128         => 8192 Number
+#   - Pool-size 128         => 32768 Number
 #   - Pool-size 256         => 4096 Number
 #   - Pool-size 512         => 2048 Number
 #   - Pool-size 1024        => 1024 Number
@@ -146,7 +146,7 @@ max:
 #   - Pool-size 8192        => 128 Number
 #   - Pool-size 1024*1024   => 8 Number
 #
-#    128:  8192
+#    128:  32768
 #    256:  4096
 #    512:  2048
 #    1024: 1024
@@ -169,7 +169,7 @@ pool:
 #    nf_instance:
 #      heartbeat: 10
 #
-#  o Message Wait Duration (Default : 2000ms = 2 seconds)
+#  o Message Wait Duration (Default : 10,000 ms = 10 seconds)
 #
 #  o Message Wait Duration (3000 ms)
 #    message:

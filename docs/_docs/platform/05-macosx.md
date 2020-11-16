@@ -75,6 +75,13 @@ Install the depedencies for building the source code.
 $ brew install mongo-c-driver gnutls libgcrypt libidn libyaml libmicrohttpd curl pkg-config
 ```
 
+Install Bison and Create soft link.
+```bash
+$ brew install bison
+$ cd /usr/local/bin
+$ ln -s ../Cellar/bison/3.7.3/bin/bison bison
+```
+
 Install Meson using Homebrew.
 ```bash
 $ brew install meson
@@ -100,8 +107,8 @@ Check whether the compilation is correct.
 {: .notice--danger}
 
 ```bash
-$ sudo ./build/test/attach/attach ## EPC Only
-$ sudo ./build/test/registration/registration ## 5G Core Only
+$ sudo ./build/tests/attach/attach ## EPC Only
+$ sudo ./build/tests/registration/registration ## 5G Core Only
 ```
 
 Run all test programs as below.

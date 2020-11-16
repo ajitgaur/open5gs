@@ -766,8 +766,10 @@ int pcrf_gx_send_rar(
                  */
                 if (gx_message.pdn.qos.qci != OGS_PDN_QCI_5 ||
                     gx_message.pdn.qos.arp.priority_level != 1) {
-                    ogs_error("CHECK WEBUI : No APN in DB with [QCI:%d]", qci);
-                    ogs_error("Please add APN using WEBUI");
+                    ogs_error("CHECK WEBUI : Even the Default "
+                        "Bearer(QCI:%d,ARP:%d) cannot support IMS signalling.",
+                        gx_message.pdn.qos.qci,
+                        gx_message.pdn.qos.arp.priority_level);
                     rx_message->result_code =
                         OGS_DIAM_RX_DIAMETER_REQUESTED_SERVICE_NOT_AUTHORIZED;
                     goto out;
@@ -1338,6 +1340,7 @@ static int encode_pcc_rule_definition(
 static int flow_rx_to_gx(ogs_flow_t *rx_flow, ogs_flow_t *gx_flow)
 {
     int len;
+    char *from_str, *to_str;
 
     ogs_assert(rx_flow);
     ogs_assert(gx_flow);
@@ -1358,8 +1361,19 @@ static int flow_rx_to_gx(ogs_flow_t *rx_flow, ogs_flow_t *gx_flow)
         len = strlen(rx_flow->description)+2;
         gx_flow->description = ogs_malloc(len);
         strcpy(gx_flow->description, "permit out");
-        strcat(gx_flow->description,
-                &rx_flow->description[strlen("permit in")]);
+        from_str = strstr(&rx_flow->description[strlen("permit in")], "from");
+        ogs_assert(from_str);
+        to_str = strstr(&rx_flow->description[strlen("permit in")], "to");
+        ogs_assert(to_str);
+        strncat(gx_flow->description,
+            &rx_flow->description[strlen("permit in")],
+            strlen(rx_flow->description) -
+                strlen("permit in") - strlen(from_str));
+        strcat(gx_flow->description, "from");
+        strcat(gx_flow->description, &to_str[strlen("to")]);
+        strcat(gx_flow->description, " to");
+        strncat(gx_flow->description, &from_str[strlen("from")],
+                strlen(from_str) - strlen(to_str) - strlen("from") - 1);
         ogs_assert(len == strlen(gx_flow->description)+1);
     } else {
         ogs_error("Invalid Flow Descripton : [%s]", rx_flow->description);

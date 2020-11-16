@@ -142,6 +142,8 @@ ED3(uint8_t spare:2;,
     uint8_t direction:2;,
     uint8_t identifier:4;)
 
+    uint8_t *identifier_node;      /* Pool-Node for Identifier */
+
     ogs_ipfw_rule_t ipfw_rule;
     char *flow_description;
 
@@ -158,8 +160,9 @@ typedef struct smf_bearer_s {
     ogs_pfcp_far_t  *ul_far;
     ogs_pfcp_qer_t  *qer;
 
-    uint8_t         *qfi;           /* 5GC */
-    uint8_t         ebi;            /* EPC */
+    uint8_t         *qfi_node;      /* Pool-Node for 5GC-QFI */
+    uint8_t         qfi;            /* 5G Core QFI */
+    uint8_t         ebi;            /* EPC EBI */
 
     uint32_t        pgw_s5u_teid;   /* PGW-S5U TEID */
     ogs_sockaddr_t  *pgw_s5u_addr;  /* PGW-S5U IPv4 */
@@ -171,7 +174,7 @@ typedef struct smf_bearer_s {
     char            *name;          /* PCC Rule Name */
     ogs_qos_t       qos;            /* QoS Infomration */
 
-    OGS_POOL(pf_pool, smf_pf_t);
+    OGS_POOL(pf_identifier_pool, uint8_t);
 
     /* Packet Filter Identifier Generator(1~15) */
     uint8_t         pf_identifier;
@@ -324,7 +327,8 @@ smf_bearer_t *smf_bearer_add(smf_sess_t *sess);
 int smf_bearer_remove(smf_bearer_t *bearer);
 void smf_bearer_remove_all(smf_sess_t *sess);
 smf_bearer_t *smf_bearer_find(uint32_t index);
-smf_bearer_t *smf_bearer_find_by_pgw_s5u_teid(uint32_t pgw_s5u_teid);
+smf_bearer_t *smf_bearer_find_by_pgw_s5u_teid(
+        smf_sess_t *sess, uint32_t pgw_s5u_teid);
 smf_bearer_t *smf_bearer_find_by_ebi(smf_sess_t *sess, uint8_t ebi);
 smf_bearer_t *smf_bearer_find_by_name(smf_sess_t *sess, char *name);
 smf_bearer_t *smf_bearer_find_by_qci_arp(smf_sess_t *sess, 
@@ -332,6 +336,8 @@ smf_bearer_t *smf_bearer_find_by_qci_arp(smf_sess_t *sess,
                                 uint8_t priority_level,
                                 uint8_t pre_emption_capability,
                                 uint8_t pre_emption_vulnerability);
+smf_bearer_t *smf_bearer_find_by_pdr_id(
+        smf_sess_t *sess, ogs_pfcp_pdr_id_t pdr_id);
 smf_bearer_t *smf_default_bearer_in_sess(smf_sess_t *sess);
 bool smf_bearer_is_default(smf_bearer_t *bearer);
 smf_bearer_t *smf_bearer_first(smf_sess_t *sess);
@@ -348,6 +354,9 @@ int smf_pco_build(uint8_t *pco_buf, uint8_t *buffer, int length);
 
 void smf_qfi_pool_init(smf_sess_t *sess);
 void smf_qfi_pool_final(smf_sess_t *sess);
+
+void smf_pf_identifier_pool_init(smf_bearer_t *bearer);
+void smf_pf_identifier_pool_final(smf_bearer_t *bearer);
 
 #ifdef __cplusplus
 }

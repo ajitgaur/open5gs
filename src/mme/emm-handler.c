@@ -51,7 +51,7 @@ int emm_handle_attach_request(mme_ue_t *mme_ue,
     char imsi_bcd[OGS_MAX_IMSI_BCD_LEN+1];
 
     ogs_assert(mme_ue);
-    enb_ue = mme_ue->enb_ue;
+    enb_ue = enb_ue_cycle(mme_ue->enb_ue);
     ogs_assert(enb_ue);
 
     ogs_assert(esm_message_container);
@@ -80,6 +80,7 @@ int emm_handle_attach_request(mme_ue_t *mme_ue,
      */
     CLEAR_MME_UE_ALL_TIMERS(mme_ue);
 
+    CLEAR_EPS_BEARER_ID(mme_ue);
     CLEAR_SERVICE_INDICATOR(mme_ue);
     if (SECURITY_CONTEXT_IS_VALID(mme_ue)) {
         ogs_kdf_kenb(mme_ue->kasme, mme_ue->ul_count.i32, mme_ue->kenb);
@@ -287,10 +288,12 @@ int emm_handle_attach_complete(
     }                
 
     emmbuf = nas_eps_security_encode(mme_ue, &message);
-    if (emmbuf) 
-        nas_eps_send_to_downlink_nas_transport(mme_ue, emmbuf);
+    if (emmbuf)  {
+        rv = nas_eps_send_to_downlink_nas_transport(mme_ue, emmbuf);
+        ogs_expect(rv == OGS_OK);
+    }
 
-    ogs_debug("[EMM] EMM information");
+    ogs_debug("EMM information");
     ogs_debug("    IMSI[%s]", mme_ue->imsi_bcd);
 
     return OGS_OK;
@@ -305,7 +308,7 @@ int emm_handle_identity_response(
     ogs_assert(identity_response);
 
     ogs_assert(mme_ue);
-    enb_ue = mme_ue->enb_ue;
+    enb_ue = enb_ue_cycle(mme_ue->enb_ue);
     ogs_assert(enb_ue);
 
     mobile_identity = &identity_response->mobile_identity;
@@ -432,7 +435,7 @@ int emm_handle_tau_request(mme_ue_t *mme_ue,
     enb_ue_t *enb_ue = NULL;
 
     ogs_assert(mme_ue);
-    enb_ue = mme_ue->enb_ue;
+    enb_ue = enb_ue_cycle(mme_ue->enb_ue);
     ogs_assert(enb_ue);
 
     ogs_assert(pkbuf);
@@ -461,11 +464,6 @@ int emm_handle_tau_request(mme_ue_t *mme_ue,
     CLEAR_MME_UE_ALL_TIMERS(mme_ue);
 
     CLEAR_SERVICE_INDICATOR(mme_ue);
-    if (BEARER_CONTEXT_IS_ACTIVE(mme_ue))
-        ogs_debug("    Bearer-Active");
-    else
-        ogs_debug("    Bearer-Inactive");
-
     if (mme_ue->nas_eps.update.active_flag)
         ogs_debug("    Active flag");
     else
@@ -566,7 +564,7 @@ int emm_handle_extended_service_request(mme_ue_t *mme_ue,
     enb_ue_t *enb_ue = NULL;
 
     ogs_assert(mme_ue);
-    enb_ue = mme_ue->enb_ue;
+    enb_ue = enb_ue_cycle(mme_ue->enb_ue);
     ogs_assert(enb_ue);
 
     /* Set Service Type */

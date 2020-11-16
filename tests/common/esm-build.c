@@ -33,11 +33,16 @@ ogs_pkbuf_t *testesm_build_pdn_connectivity_request(test_sess_t *sess)
         &pdn_connectivity_request->esm_information_transfer_flag;
     ogs_nas_protocol_configuration_options_t *protocol_configuration_options =
         &pdn_connectivity_request->protocol_configuration_options;
+#if 0
     uint8_t ue_pco[29] =
             "\x80\x80\x21\x10\x01\x01\x00\x10\x81\x06\x00\x00\x00\x00"
             "\x83\x06\x00\x00\x00\x00\x00\x03\x00\x00\x0a\x00\x00\x0d\x00";
-#if 0
     uint8_t ue_pco[7] = "\x80\x00\x0a\x00\x00\x0d\x00";
+#else
+    uint8_t ue_pco[35] =
+        "\x80\x80\x21\x10\x01\x00\x00\x10\x81\x06\x00\x00\x00\x00"
+        "\x83\x06\x00\x00\x00\x00\x00\x0c\x00\x00\x0d\x00\x00\x02\x00\x00"
+        "\x0a\x00\x00\x10\x00";
 #endif
 
     test_ue_t *test_ue = NULL;
@@ -138,9 +143,16 @@ ogs_pkbuf_t *testesm_build_esm_information_response(test_sess_t *sess)
     ogs_nas_protocol_configuration_options_t *protocol_configuration_options =
         &esm_information_response->protocol_configuration_options;
 
+#if 0
     uint8_t ue_pco[29] =
             "\x80\x80\x21\x10\x01\x01\x00\x10\x81\x06\x00\x00\x00\x00"
             "\x83\x06\x00\x00\x00\x00\x00\x03\x00\x00\x0a\x00\x00\x0d\x00";
+#else
+    uint8_t ue_pco[35] =
+        "\x80\x80\x21\x10\x01\x00\x00\x10\x81\x06\x00\x00\x00\x00"
+        "\x83\x06\x00\x00\x00\x00\x00\x0c\x00\x00\x0d\x00\x00\x02\x00\x00"
+        "\x0a\x00\x00\x10\x00";
+#endif
 
     test_ue_t *test_ue = NULL;
     ogs_pkbuf_t *pkbuf = NULL;
@@ -200,7 +212,6 @@ ogs_pkbuf_t *testesm_build_activate_default_eps_bearer_context_accept(
             OGS_NAS_SECURITY_HEADER_INTEGRITY_PROTECTED_AND_CIPHERED;
         message.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
     }
-
 
     message.esm.h.eps_bearer_identity = bearer->ebi;
     message.esm.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_ESM;
@@ -413,7 +424,7 @@ ogs_pkbuf_t *testesm_build_bearer_resource_modification_request(
     } else if (tft.code ==
             OGS_GTP_TFT_CODE_ADD_PACKET_FILTERS_TO_EXISTING_TFT) {
         tft.num_of_packet_filter = 1;
-        tft.pf[0].direction = 1;
+        tft.pf[0].direction = 2;
         tft.pf[0].identifier = 4;
         tft.pf[0].precedence = 0x0f;
 
@@ -422,14 +433,14 @@ ogs_pkbuf_t *testesm_build_bearer_resource_modification_request(
 #if 1
         tft.pf[0].length = 18;
         tft.pf[0].component[0].type =
-            GTP_PACKET_FILTER_IPV6_REMOTE_ADDRESS_PREFIX_LENGTH_TYPE;
+            GTP_PACKET_FILTER_IPV6_LOCAL_ADDRESS_PREFIX_LENGTH_TYPE;
         memcpy(tft.pf[0].component[0].ipv6.addr, ipsubnet.sub,
                 sizeof(tft.pf[0].component[0].ipv6.addr));
         tft.pf[0].component[0].ipv6.prefixlen = 120;
 #else
         tft.pf[0].length = 33;
         tft.pf[0].component[0].type =
-            GTP_PACKET_FILTER_IPV6_REMOTE_ADDRESS_TYPE;
+            GTP_PACKET_FILTER_IPV6_LOCAL_ADDRESS_TYPE;
         memcpy(tft.pf[0].component[0].ipv6_mask.addr, ipsubnet.sub,
                 sizeof(tft.pf[0].component[0].ipv6_mask.addr));
         memcpy(tft.pf[0].component[0].ipv6_mask.mask, ipsubnet.mask,

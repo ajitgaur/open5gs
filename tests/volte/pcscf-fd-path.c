@@ -67,7 +67,7 @@ static int pcscf_rx_fb_cb(struct msg **msg, struct avp *avp,
 	return ENOTSUP;
 }
 
-void pcscf_rx_send_aar(uint8_t **rx_sid,
+void pcscf_rx_send_aar_audio(uint8_t **rx_sid,
         test_sess_t *sess, int id_type, int qos_type, int flow_type)
 {
     int rv;
@@ -377,7 +377,7 @@ void pcscf_rx_send_aar(uint8_t **rx_sid,
         ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
         ogs_assert(ret == 0);
         #define TEST_OGS_DIAM_RX_FLOW_DESC1  \
-            "permit out 17 from 172.20.166.84 to 172.18.128.20 20001"
+            "permit out 17 from 172.20.166.84 to 10.45.0.2 20001"
         val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC1;
         val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC1);
         ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -388,7 +388,7 @@ void pcscf_rx_send_aar(uint8_t **rx_sid,
         ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
         ogs_assert(ret == 0);
         #define TEST_OGS_DIAM_RX_FLOW_DESC2  \
-            "permit in 17 from 172.18.128.20 to 172.20.166.84 20360"
+            "permit in 17 from 10.45.0.2 to 172.20.166.84 20360"
         val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC2;
         val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC2);
         ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -421,7 +421,7 @@ void pcscf_rx_send_aar(uint8_t **rx_sid,
         ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
         ogs_assert(ret == 0);
         #define TEST_OGS_DIAM_RX_FLOW_DESC3  \
-            "permit out 17 from 172.20.166.84 to 172.18.128.20 20002"
+            "permit out 17 from 172.20.166.84 to 10.45.0.2 20002"
         val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC3;
         val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC3);
         ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -432,7 +432,7 @@ void pcscf_rx_send_aar(uint8_t **rx_sid,
         ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
         ogs_assert(ret == 0);
         #define TEST_OGS_DIAM_RX_FLOW_DESC4  \
-            "permit in 17 from 172.18.128.20 to 172.20.166.84 20361"
+            "permit in 17 from 10.45.0.2 to 172.20.166.84 20361"
         val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC4;
         val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC4);
         ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -475,7 +475,7 @@ void pcscf_rx_send_aar(uint8_t **rx_sid,
     ogs_free(sip_uri);
 }
 
-void pcscf_rx_send_aar2(uint8_t **rx_sid, test_sess_t *sess, int id_type)
+void pcscf_rx_send_aar_video(uint8_t **rx_sid, test_sess_t *sess, int id_type)
 {
     int rv;
     int ret;
@@ -670,7 +670,7 @@ void pcscf_rx_send_aar2(uint8_t **rx_sid, test_sess_t *sess, int id_type)
     ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
     ogs_assert(ret == 0);
     #define TEST_OGS_DIAM_RX_FLOW_DESC5  \
-        "permit out 17 from 45.45.0.3 50022 to 45.45.0.5 50026"
+        "permit out 17 from 45.45.0.5 50026 to 45.45.0.3 50022"
     val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC5;
     val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC5);
     ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -681,7 +681,7 @@ void pcscf_rx_send_aar2(uint8_t **rx_sid, test_sess_t *sess, int id_type)
     ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
     ogs_assert(ret == 0);
     #define TEST_OGS_DIAM_RX_FLOW_DESC6  \
-        "permit in 17 from 45.45.0.5 50026 to 45.45.0.3 50022"
+        "permit in 17 from 45.45.0.3 50022 to 45.45.0.5 50026"
     val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC6;
     val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC6);
     ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -692,7 +692,7 @@ void pcscf_rx_send_aar2(uint8_t **rx_sid, test_sess_t *sess, int id_type)
     ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
     ogs_assert(ret == 0);
     #define TEST_OGS_DIAM_RX_FLOW_DESC7  \
-        "permit out 17 from 45.45.0.3 50023 to 45.45.0.5 50027"
+        "permit out 17 from 45.45.0.5 50027 to 45.45.0.3 50023"
     val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC7;
     val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC7);
     ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -703,7 +703,7 @@ void pcscf_rx_send_aar2(uint8_t **rx_sid, test_sess_t *sess, int id_type)
     ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
     ogs_assert(ret == 0);
     #define TEST_OGS_DIAM_RX_FLOW_DESC8  \
-        "permit in 17 from 45.45.0.5 50027 to 45.45.0.3 50023"
+        "permit in 17 from 45.45.0.3 50023 to 45.45.0.5 50027"
     val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC8;
     val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC8);
     ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -854,7 +854,7 @@ void pcscf_rx_send_aar2(uint8_t **rx_sid, test_sess_t *sess, int id_type)
     ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
     ogs_assert(ret == 0);
     #define TEST_OGS_DIAM_RX_FLOW_DESC9  \
-        "permit out 17 from 45.45.0.3 60010 to 45.45.0.5 60010"
+        "permit out 17 from 45.45.0.5 60010 to 45.45.0.3 60010"
     val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC9;
     val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC9);
     ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -865,7 +865,7 @@ void pcscf_rx_send_aar2(uint8_t **rx_sid, test_sess_t *sess, int id_type)
     ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
     ogs_assert(ret == 0);
     #define TEST_OGS_DIAM_RX_FLOW_DESC10  \
-        "permit in 17 from 45.45.0.5 60010 to 45.45.0.3 60010"
+        "permit in 17 from 45.45.0.3 60010 to 45.45.0.5 60010"
     val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC10;
     val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC10);
     ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -876,7 +876,7 @@ void pcscf_rx_send_aar2(uint8_t **rx_sid, test_sess_t *sess, int id_type)
     ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
     ogs_assert(ret == 0);
     #define TEST_OGS_DIAM_RX_FLOW_DESC11  \
-        "permit out 17 from 45.45.0.3 60011 to 45.45.0.5 60011"
+        "permit out 17 from 45.45.0.5 60011 to 45.45.0.3 60011"
     val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC11;
     val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC11);
     ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -887,7 +887,7 @@ void pcscf_rx_send_aar2(uint8_t **rx_sid, test_sess_t *sess, int id_type)
     ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
     ogs_assert(ret == 0);
     #define TEST_OGS_DIAM_RX_FLOW_DESC12  \
-        "permit in 17 from 45.45.0.5 60011 to 45.45.0.3 60011"
+        "permit in 17 from 45.45.0.3 60011 to 45.45.0.5 60011"
     val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC12;
     val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC12);
     ret = fd_msg_avp_setvalue (avpch2, &val);
@@ -1124,12 +1124,409 @@ void pcscf_rx_send_aar2(uint8_t **rx_sid, test_sess_t *sess, int id_type)
     /* Keep a pointer to the session data for debug purpose,
      * in real life we would not need it */
     svg = sess_data;
-    
+
     /* Store this value in the session */
     ret = fd_sess_state_store(pcscf_rx_reg, session, &sess_data);
     ogs_assert(ret == 0);
     ogs_assert(sess_data == NULL);
-    
+
+    /* Send the request */
+    ret = fd_msg_send(&req, pcscf_rx_aaa_cb, svg);
+    ogs_assert(ret == 0);
+
+    /* Increment the counter */
+    ogs_assert(pthread_mutex_lock(&ogs_diam_logger_self()->stats_lock) == 0);
+    ogs_diam_logger_self()->stats.nb_sent++;
+    ogs_assert(pthread_mutex_unlock(&ogs_diam_logger_self()->stats_lock) == 0);
+
+    /* Free string memory */
+    ogs_free(sip_uri);
+}
+
+void pcscf_rx_send_aar_ctrl(uint8_t **rx_sid, test_sess_t *sess, int id_type)
+{
+    int rv;
+    int ret;
+
+    struct msg *req = NULL;
+    struct avp *avp;
+    struct avp *avpch1, *avpch2;
+    union avp_value val;
+    struct sess_state *sess_data = NULL, *svg;
+    struct session *session = NULL;
+    int new;
+
+    test_ue_t *test_ue = NULL;
+    char *ipstr = NULL;
+    char *sip_uri = NULL;
+    ogs_paa_t paa;
+    ogs_ipsubnet_t ipsub;
+
+    ogs_assert(sess);
+    test_ue = sess->test_ue;
+    ogs_assert(test_ue);
+    ogs_assert(rx_sid);
+
+    ogs_assert(sess->ue_ip.ipv4);
+    ipstr = ogs_ipv4_to_string(sess->ue_ip.addr);
+    ogs_assert(ipstr);
+    sip_uri = ogs_msprintf("sip:%s@ims.mnc0970.mcc901.3gppnetwork.org", ipstr);
+    ogs_assert(sip_uri);
+
+    rv = ogs_ipsubnet(&ipsub, ipstr, NULL);
+    ogs_assert(rv == OGS_OK);
+    ogs_free(ipstr);
+
+    /* Create the request */
+    ret = fd_msg_new(ogs_diam_rx_cmd_aar, MSGFL_ALLOC_ETEID, &req);
+    ogs_assert(ret == 0);
+    {
+        struct msg_hdr * h;
+        ret = fd_msg_hdr( req, &h );
+        ogs_assert(ret == 0);
+        h->msg_appl = OGS_DIAM_RX_APPLICATION_ID;
+    }
+
+    /* Find Diameter Rx Session */
+    if (*rx_sid) {
+        /* Retrieve session by Session-Id */
+        size_t sidlen = strlen((char *)*rx_sid);
+		ret = fd_sess_fromsid_msg(*rx_sid, sidlen, &session, &new);
+        ogs_assert(ret == 0);
+        ogs_assert(new == 0);
+
+        /* Add Session-Id to the message */
+        ret = ogs_diam_message_session_id_set(req, *rx_sid, sidlen);
+        ogs_assert(ret == 0);
+        /* Save the session associated with the message */
+        ret = fd_msg_sess_set(req, session);
+    } else {
+        /* Create a new session */
+        #define OGS_DIAM_RX_APP_SID_OPT  "app_rx"
+        ret = fd_msg_new_session(req, (os0_t)OGS_DIAM_RX_APP_SID_OPT,
+                CONSTSTRLEN(OGS_DIAM_RX_APP_SID_OPT));
+        ogs_assert(ret == 0);
+        ret = fd_msg_sess_get(fd_g_config->cnf_dict, req, &session, NULL);
+        ogs_assert(ret == 0);
+    }
+
+    /* Retrieve session state in this session */
+    ret = fd_sess_state_retrieve(pcscf_rx_reg, session, &sess_data);
+    if (!sess_data) {
+        os0_t sid;
+        size_t sidlen;
+
+        ret = fd_sess_getsid(session, &sid, &sidlen);
+        ogs_assert(ret == 0);
+
+        /* Allocate new session state memory */
+        sess_data = new_state(sid);
+        ogs_assert(sess_data);
+
+        /* Save Session-Id to PGW Session Context */
+        *rx_sid = sess_data->sid;
+    }
+
+    /* Set Origin-Host & Origin-Realm */
+    ret = fd_msg_add_origin(req, 0);
+    ogs_assert(ret == 0);
+
+    /* Set the Destination-Realm AVP */
+    ret = fd_msg_avp_new(ogs_diam_destination_realm, 0, &avp);
+    ogs_assert(ret == 0);
+    val.os.data = (unsigned char *)(fd_g_config->cnf_diamrlm);
+    val.os.len  = strlen(fd_g_config->cnf_diamrlm);
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    /* Set the Auth-Application-Id AVP */
+    ret = fd_msg_avp_new(ogs_diam_auth_application_id, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_APPLICATION_ID;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    /* Set Vendor-Specific-Application-Id AVP */
+    ret = ogs_diam_message_vendor_specific_appid_set(
+            req, OGS_DIAM_RX_APPLICATION_ID);
+    ogs_assert(ret == 0);
+
+    /* Set Subscription-Id */
+    ret = fd_msg_avp_new(ogs_diam_rx_subscription_id, 0, &avp);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_subscription_id_type, 0, &avpch1);
+    ogs_assert(ret == 0);
+    val.i32 = id_type;
+    ret = fd_msg_avp_setvalue(avpch1, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avp, MSG_BRW_LAST_CHILD, avpch1);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_subscription_id_data, 0, &avpch1);
+    ogs_assert(ret == 0);
+    if (id_type == OGS_DIAM_RX_SUBSCRIPTION_ID_TYPE_END_USER_IMSI) {
+        val.os.data = (uint8_t *)test_ue->imsi;
+        val.os.len  = strlen(test_ue->imsi);
+    } else if (id_type == OGS_DIAM_RX_SUBSCRIPTION_ID_TYPE_END_USER_SIP_URI) {
+        val.os.data = (uint8_t *)sip_uri;
+        val.os.len  = strlen(sip_uri);
+    }
+    ret = fd_msg_avp_setvalue (avpch1, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avp, MSG_BRW_LAST_CHILD, avpch1);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    /* Set Media-Component-Description #1 */
+    ret = fd_msg_avp_new(ogs_diam_rx_media_component_description, 0, &avp);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_media_component_number, 0, &avpch1);
+    ogs_assert(ret == 0);
+    val.i32 = 1;
+    ret = fd_msg_avp_setvalue (avpch1, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avp, MSG_BRW_LAST_CHILD, avpch1);
+    ogs_assert(ret == 0);
+
+    /* Set Media-Sub-Component #1 */
+    ret = fd_msg_avp_new(ogs_diam_rx_media_sub_component, 0, &avpch1);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_flow_number, 0, &avpch2);
+    ogs_assert(ret == 0);
+    val.i32 = 1;
+    ret = fd_msg_avp_setvalue (avpch2, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avpch1, MSG_BRW_LAST_CHILD, avpch2);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
+    ogs_assert(ret == 0);
+    #define TEST_OGS_DIAM_RX_FLOW_DESC13  \
+        "permit out ip from 172.30.0.144 43810 to 45.45.0.4 43810"
+    val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC13;
+    val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC13);
+    ret = fd_msg_avp_setvalue (avpch2, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avpch1, MSG_BRW_LAST_CHILD, avpch2);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
+    ogs_assert(ret == 0);
+    #define TEST_OGS_DIAM_RX_FLOW_DESC14  \
+        "permit in ip from 45.45.0.4 43810 to 172.30.0.144 43810"
+    val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC14;
+    val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC14);
+    ret = fd_msg_avp_setvalue (avpch2, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avpch1, MSG_BRW_LAST_CHILD, avpch2);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
+    ogs_assert(ret == 0);
+    #define TEST_OGS_DIAM_RX_FLOW_DESC15  \
+        "permit out ip from 172.30.0.144 43811 to 45.45.0.4 43811"
+    val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC15;
+    val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC15);
+    ret = fd_msg_avp_setvalue (avpch2, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avpch1, MSG_BRW_LAST_CHILD, avpch2);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_flow_description, 0, &avpch2);
+    ogs_assert(ret == 0);
+    #define TEST_OGS_DIAM_RX_FLOW_DESC16  \
+        "permit in ip from 45.45.0.4 43811 to 172.30.0.144 43811"
+    val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_FLOW_DESC16;
+    val.os.len  = strlen(TEST_OGS_DIAM_RX_FLOW_DESC16);
+    ret = fd_msg_avp_setvalue (avpch2, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avpch1, MSG_BRW_LAST_CHILD, avpch2);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_flow_usage, 0, &avpch2);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_FLOW_USAGE_AF_SIGNALLING;
+    ret = fd_msg_avp_setvalue (avpch2, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avpch1, MSG_BRW_LAST_CHILD, avpch2);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_add (avp, MSG_BRW_LAST_CHILD, avpch1);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_media_type, 0, &avpch1);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_MEDIA_TYPE_CONTROL;
+    ret = fd_msg_avp_setvalue (avpch1, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avp, MSG_BRW_LAST_CHILD, avpch1);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_codec_data, 0, &avpch1);
+    ogs_assert(ret == 0);
+    #define TEST_OGS_DIAM_RX_CODEC_DATA5 \
+        "uplink\noffer\n"
+    val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_CODEC_DATA5;
+    val.os.len  = strlen(TEST_OGS_DIAM_RX_CODEC_DATA5) + 1;
+    ret = fd_msg_avp_setvalue (avpch1, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avp, MSG_BRW_LAST_CHILD, avpch1);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_codec_data, 0, &avpch1);
+    ogs_assert(ret == 0);
+    #define TEST_OGS_DIAM_RX_CODEC_DATA6 \
+        "downlink\nanswer\n"
+    val.os.data = (uint8_t *)TEST_OGS_DIAM_RX_CODEC_DATA6;
+    val.os.len  = strlen(TEST_OGS_DIAM_RX_CODEC_DATA6) + 1;
+    ret = fd_msg_avp_setvalue (avpch1, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avp, MSG_BRW_LAST_CHILD, avpch1);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_flow_status, 0, &avpch1);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_FLOW_STATUS_ENABLED;
+    ret = fd_msg_avp_setvalue (avpch1, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add (avp, MSG_BRW_LAST_CHILD, avpch1);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    /* Set the Specific-Action AVP */
+    ret = fd_msg_avp_new(ogs_diam_rx_specific_action, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_SPECIFIC_ACTION_CHARGING_CORRELATION_EXCHANGE;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_specific_action, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_SPECIFIC_ACTION_INDICATION_OF_LOSS_OF_BEARER;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_specific_action, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_SPECIFIC_ACTION_INDICATION_OF_RECOVERY_OF_BEARER;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_specific_action, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_SPECIFIC_ACTION_INDICATION_OF_RELEASE_OF_BEARER;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_specific_action, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_SPECIFIC_ACTION_INDICATION_OF_ESTABLISHMENT_OF_BEARER;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_specific_action, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_SPECIFIC_ACTION_IP_CAN_CHANGE;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    ret = fd_msg_avp_new(ogs_diam_rx_specific_action, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = OGS_DIAM_RX_SPECIFIC_ACTION_ACCESS_NETWORK_INFO_REPORT;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    if (ipsub.family == AF_INET) {
+        /* Set Framed-IP-Address */
+        ret = fd_msg_avp_new(ogs_diam_rx_framed_ip_address, 0, &avp);
+        ogs_assert(ret == 0);
+        val.os.data = (uint8_t*)ipsub.sub;
+        val.os.len = OGS_IPV4_LEN;
+        ret = fd_msg_avp_setvalue(avp, &val);
+        ogs_assert(ret == 0);
+        ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+        ogs_assert(ret == 0);
+    } else if (ipsub.family == AF_INET6) {
+        /* Set Framed-IPv6-Prefix */
+        ret = fd_msg_avp_new(ogs_diam_rx_framed_ipv6_prefix, 0, &avp);
+        ogs_assert(ret == 0);
+        memset(&paa, 0, sizeof(ogs_paa_t));
+
+        memcpy(paa.addr6, ipsub.sub, OGS_IPV6_LEN);
+        paa.pdn_type = 0x03;
+#define FRAMED_IPV6_PREFIX_LENGTH 128  /* from spec document */
+        paa.len = FRAMED_IPV6_PREFIX_LENGTH;
+        val.os.data = (uint8_t*)&paa;
+        val.os.len = OGS_PAA_IPV6_LEN;
+        ret = fd_msg_avp_setvalue(avp, &val);
+        ogs_assert(ret == 0);
+        ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+        ogs_assert(ret == 0);
+    }
+
+    /* Set the Authroization-Lifetime AVP */
+    ret = fd_msg_avp_new(ogs_diam_authorization_lifetime, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = 7200;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    /* Set the Auth-Grace-Period AVP */
+    ret = fd_msg_avp_new(ogs_diam_auth_grace_period, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = 0;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    /* Set the Session-Timeout AVP */
+    ret = fd_msg_avp_new(ogs_diam_session_timeout, 0, &avp);
+    ogs_assert(ret == 0);
+    val.i32 = 7200;
+    ret = fd_msg_avp_setvalue(avp, &val);
+    ogs_assert(ret == 0);
+    ret = fd_msg_avp_add(req, MSG_BRW_LAST_CHILD, avp);
+    ogs_assert(ret == 0);
+
+    ret = clock_gettime(CLOCK_REALTIME, &sess_data->ts);
+    ogs_assert(ret == 0);
+
+    /* Keep a pointer to the session data for debug purpose,
+     * in real life we would not need it */
+    svg = sess_data;
+
+    /* Store this value in the session */
+    ret = fd_sess_state_store(pcscf_rx_reg, session, &sess_data);
+    ogs_assert(ret == 0);
+    ogs_assert(sess_data == NULL);
+
     /* Send the request */
     ret = fd_msg_send(&req, pcscf_rx_aaa_cb, svg);
     ogs_assert(ret == 0);

@@ -105,6 +105,7 @@ void testgmm_send_to_gsm(test_sess_t *sess,
     ogs_assert(payload_container->length);
 
     gsmbuf = ogs_pkbuf_alloc(NULL, payload_container->length);
+    ogs_assert(gsmbuf);
     ogs_pkbuf_put_data(gsmbuf,
             payload_container->buffer, payload_container->length);
 
@@ -186,6 +187,7 @@ void testesm_recv(test_ue_t *test_ue, ogs_pkbuf_t *pkbuf)
     case OGS_NAS_EPS_MODIFY_EPS_BEARER_CONTEXT_REQUEST:
         break;
     case OGS_NAS_EPS_DEACTIVATE_EPS_BEARER_CONTEXT_REQUEST:
+        testesm_handle_deactivate_eps_bearer_context_request(test_ue, &message);
         break;
     case OGS_NAS_EPS_BEARER_RESOURCE_ALLOCATION_REJECT:
         break;
@@ -209,6 +211,7 @@ void testemm_send_to_esm(test_ue_t *test_ue,
     ogs_assert(esm_message_container->buffer);
 
     esmbuf = ogs_pkbuf_alloc(NULL, esm_message_container->length);
+    ogs_assert(esmbuf);
     ogs_pkbuf_put_data(esmbuf,
             esm_message_container->buffer, esm_message_container->length);
 

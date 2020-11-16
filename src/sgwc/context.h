@@ -121,12 +121,6 @@ typedef struct sgwc_bearer_s {
 
     uint8_t         ebi;
 
-    /* Pkts which will be buffered in case of UE-IDLE */
-    uint32_t        num_buffered_pkt;
-
-#define MAX_NUM_OF_PACKET_BUFFER      512 
-    ogs_pkbuf_t*    buffered_pkts[MAX_NUM_OF_PACKET_BUFFER];
-
     ogs_list_t      tunnel_list;
     sgwc_sess_t     *sess;
     sgwc_ue_t       *sgwc_ue;
@@ -185,21 +179,24 @@ sgwc_sess_t *sgwc_sess_find_by_ebi(sgwc_ue_t *sgwc_ue, uint8_t ebi);
 sgwc_bearer_t *sgwc_bearer_add(sgwc_sess_t *sess);
 int sgwc_bearer_remove(sgwc_bearer_t *bearer);
 void sgwc_bearer_remove_all(sgwc_sess_t *sess);
-sgwc_bearer_t *sgwc_bearer_find_by_sgwc_s5u_teid(
-                                uint32_t sgwc_s5u_teid);
 sgwc_bearer_t *sgwc_bearer_find_by_sess_ebi(
                                 sgwc_sess_t *sess, uint8_t ebi);
 sgwc_bearer_t *sgwc_bearer_find_by_ue_ebi(
                                 sgwc_ue_t *sgwc_ue, uint8_t ebi);
+sgwc_bearer_t *sgwc_bearer_find_by_error_indication_report(
+        sgwc_sess_t *sess,
+        ogs_pfcp_tlv_error_indication_report_t *error_indication_report);
 sgwc_bearer_t *sgwc_default_bearer_in_sess(sgwc_sess_t *sess);
 
 sgwc_tunnel_t *sgwc_tunnel_add(
         sgwc_bearer_t *bearer, uint8_t interface_type);
 int sgwc_tunnel_remove(sgwc_tunnel_t *tunnel);
 void sgwc_tunnel_remove_all(sgwc_bearer_t *bearer);
-sgwc_tunnel_t *sgwc_tunnel_find_by_teid(uint32_t teid);
+sgwc_tunnel_t *sgwc_tunnel_find_by_teid(sgwc_ue_t *sgwc_ue, uint32_t teid);
 sgwc_tunnel_t *sgwc_tunnel_find_by_interface_type(
         sgwc_bearer_t *bearer, uint8_t interface_type);
+sgwc_tunnel_t *sgwc_tunnel_find_by_pdr_id(
+        sgwc_sess_t *sess, ogs_pfcp_pdr_id_t pdr_id);
 sgwc_tunnel_t *sgwc_dl_tunnel_in_bearer(sgwc_bearer_t *bearer);
 sgwc_tunnel_t *sgwc_ul_tunnel_in_bearer(sgwc_bearer_t *bearer);
 

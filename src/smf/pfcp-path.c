@@ -70,6 +70,7 @@ static void pfcp_recv_cb(short when, ogs_socket_t fd, void *data)
     ogs_assert(fd != INVALID_SOCKET);
 
     pkbuf = ogs_pkbuf_alloc(NULL, OGS_MAX_SDU_LEN);
+    ogs_assert(pkbuf);
     ogs_pkbuf_put(pkbuf, OGS_MAX_SDU_LEN);
 
     size = ogs_recvfrom(fd, pkbuf->data, pkbuf->len, 0, &from);
@@ -93,7 +94,10 @@ static void pfcp_recv_cb(short when, ogs_socket_t fd, void *data)
         rsp.type = OGS_PFCP_VERSION_NOT_SUPPORTED_RESPONSE_TYPE;
         rsp.length = htobe16(4);
         rsp.sqn_only = h->sqn_only;
-        ogs_sendto(fd, &rsp, 8, 0, &from);
+        if (ogs_sendto(fd, &rsp, 8, 0, &from) < 0) {
+            ogs_log_message(OGS_LOG_ERROR, ogs_socket_errno,
+                    "ogs_sendto() failed");
+        }
         ogs_pkbuf_free(pkbuf);
 
         return;
@@ -224,7 +228,7 @@ static void sess_epc_timeout(ogs_pfcp_xact_t *xact, void *data)
 
     switch (type) {
     case OGS_PFCP_SESSION_ESTABLISHMENT_REQUEST_TYPE:
-        ogs_error("No PFCP session establishment response");
+        ogs_warn("No PFCP session establishment response");
         break;
     case OGS_PFCP_SESSION_MODIFICATION_REQUEST_TYPE:
         ogs_error("No PFCP session modification response");

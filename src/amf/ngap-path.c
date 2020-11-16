@@ -46,49 +46,23 @@ void ngap_close()
     ogs_socknode_remove_all(&amf_self()->ngap_list6);
 }
 
-int ngap_send(ogs_sock_t *sock, ogs_pkbuf_t *pkbuf,
-        ogs_sockaddr_t *addr, uint16_t stream_no)
-{
-    int sent;
-
-    ogs_assert(sock);
-    ogs_assert(pkbuf);
-
-    sent = ogs_sctp_sendmsg(sock, pkbuf->data, pkbuf->len,
-            addr, OGS_SCTP_NGAP_PPID, stream_no);
-    if (sent < 0 || sent != pkbuf->len) {
-        ogs_error("ogs_sctp_sendmsg error (%d:%s)", errno, strerror(errno));
-        return OGS_ERROR;
-    }
-    ogs_pkbuf_free(pkbuf);
-
-    return OGS_OK;
-}
-
 int ngap_send_to_gnb(amf_gnb_t *gnb, ogs_pkbuf_t *pkbuf, uint16_t stream_no)
 {
     char buf[OGS_ADDRSTRLEN];
-    int rv;
 
     ogs_assert(gnb);
     ogs_assert(pkbuf);
-    ogs_assert(gnb->sock);
+    ogs_assert(gnb->sctp.sock);
 
     ogs_debug("    IP[%s] RAN_ID[%d]",
-            OGS_ADDR(gnb->addr, buf), gnb->gnb_id);
+            OGS_ADDR(gnb->sctp.addr, buf), gnb->gnb_id);
 
-    rv = ngap_send(gnb->sock, pkbuf,
-            gnb->sock_type == SOCK_STREAM ? NULL : gnb->addr,
-            stream_no);
-    if (rv != OGS_OK) {
-        ogs_error("ngap_send() failed");
-
-        ogs_pkbuf_free(pkbuf);
-        ngap_event_push(AMF_EVT_NGAP_LO_CONNREFUSED,
-                gnb->sock, gnb->addr, NULL, 0, 0);
+    if (gnb->sctp.type == SOCK_STREAM) {
+        ogs_sctp_write_to_buffer(&gnb->sctp, pkbuf);
+        return OGS_OK;
+    } else {
+        return ogs_sctp_senddata(gnb->sctp.sock, pkbuf, gnb->sctp.addr);
     }
-
-    return rv;
 }
 
 int ngap_send_to_ran_ue(ran_ue_t *ran_ue, ogs_pkbuf_t *pkbuf)
@@ -169,6 +143,7 @@ int ngap_send_to_nas(ran_ue_t *ran_ue,
     /* The Packet Buffer(pkbuf_t) for NAS message MUST make a HEADROOM. 
      * When calculating AES_CMAC, we need to use the headroom of the packet. */
     nasbuf = ogs_pkbuf_alloc(NULL, OGS_NAS_HEADROOM+nasPdu->size);
+    ogs_assert(nasbuf);
     ogs_pkbuf_reserve(nasbuf, OGS_NAS_HEADROOM);
     ogs_pkbuf_put_data(nasbuf, nasPdu->buf, nasPdu->size);
 
@@ -234,7 +209,10 @@ int ngap_send_to_nas(ran_ue_t *ran_ue,
     } else if (h->extended_protocol_discriminator ==
             OGS_NAS_EXTENDED_PROTOCOL_DISCRIMINATOR_5GSM) {
         amf_ue_t *amf_ue = ran_ue->amf_ue;
-        ogs_assert(amf_ue);
+        if (!amf_ue) {
+            ogs_error("No UE Context");
+            return OGS_ERROR;
+        }
         return ngap_send_to_5gsm(amf_ue, nasbuf);
     } else {
         ogs_error("Unknown NAS Protocol discriminator 0x%02x",
@@ -312,31 +290,27 @@ void ngap_send_ran_ue_context_release_command(
     ogs_debug("    RAN_UE_NGAP_ID[%d] AMF_UE_NGAP_ID[%lld]",
             ran_ue->ran_ue_ngap_id, (long long)ran_ue->amf_ue_ngap_id);
 
-    if (delay) {
-        ogs_assert(action != NGAP_UE_CTX_REL_INVALID_ACTION);
-        ran_ue->ue_ctx_rel_action = action;
+    ogs_assert(action != NGAP_UE_CTX_REL_INVALID_ACTION);
+    ran_ue->ue_ctx_rel_action = action;
 
-        ogs_debug("    Group[%d] Cause[%d] Action[%d] Delay[%d]",
-                group, (int)cause, action, delay);
+    ogs_debug("    Group[%d] Cause[%d] Action[%d] Delay[%d]",
+            group, (int)cause, action, delay);
 
-        ngapbuf = ngap_build_ue_context_release_command(ran_ue, group, cause);
-        ogs_expect_or_return(ngapbuf);
+    ngapbuf = ngap_build_ue_context_release_command(ran_ue, group, cause);
+    ogs_expect_or_return(ngapbuf);
 
-        rv = ngap_delayed_send_to_ran_ue(ran_ue, ngapbuf, delay);
-        ogs_expect(rv == OGS_OK);
-    } else {
-        ogs_assert(action != NGAP_UE_CTX_REL_INVALID_ACTION);
-        ran_ue->ue_ctx_rel_action = action;
+    rv = ngap_delayed_send_to_ran_ue(ran_ue, ngapbuf, delay);
+    ogs_expect(rv == OGS_OK);
 
-        ogs_debug("    Group[%d] Cause[%d] Action[%d] Delay[%d]",
-                group, (int)cause, action, delay);
+    if (ran_ue->t_ng_holding)
+        ogs_timer_delete(ran_ue->t_ng_holding);
 
-        ngapbuf = ngap_build_ue_context_release_command(ran_ue, group, cause);
-        ogs_expect_or_return(ngapbuf);
+    ran_ue->t_ng_holding = ogs_timer_add(
+            ogs_app()->timer_mgr, amf_timer_ng_holding_timer_expire, ran_ue);
+    ogs_assert(ran_ue->t_ng_holding);
 
-        rv = ngap_delayed_send_to_ran_ue(ran_ue, ngapbuf, 0);
-        ogs_expect(rv == OGS_OK);
-    }
+    ogs_timer_start(ran_ue->t_ng_holding,
+            amf_timer_cfg(AMF_TIMER_NG_HOLDING)->duration);
 }
 
 void ngap_send_amf_ue_context_release_command(
@@ -345,7 +319,7 @@ void ngap_send_amf_ue_context_release_command(
 {
     ogs_assert(amf_ue);
 
-    ran_ue_t *ran_ue = amf_ue->ran_ue;
+    ran_ue_t *ran_ue = ran_ue_cycle(amf_ue->ran_ue);
     if (ran_ue) {
         ngap_send_ran_ue_context_release_command(ran_ue,
                 group, cause, action, delay);
@@ -380,6 +354,7 @@ void ngap_send_paging(amf_ue_t *amf_ue, NGAP_CNDomain_t cn_domain)
                 }
 
                 amf_ue->t3413.pkbuf = ogs_pkbuf_copy(ngapbuf);
+                ogs_assert(amf_ue->t3413.pkbuf);
 
                 rv = ngap_send_to_gnb(gnb, ngapbuf, NGAP_NON_UE_SIGNALLING);
                 ogs_expect(rv == OGS_OK);
@@ -488,7 +463,7 @@ void ngap_send_handover_request(
     ogs_assert(target_gnb);
 
     ogs_assert(amf_ue);
-    source_ue = amf_ue->ran_ue;
+    source_ue = ran_ue_cycle(amf_ue->ran_ue);
     ogs_assert(source_ue);
     ogs_assert(source_ue->target_ue == NULL);
 
@@ -557,7 +532,7 @@ void ngap_send_error_indication2(
     ran_ue_t *ran_ue;
 
     ogs_assert(amf_ue);
-    ran_ue = amf_ue->ran_ue;
+    ran_ue = ran_ue_cycle(amf_ue->ran_ue);
     ogs_expect_or_return(ran_ue);
     gnb = ran_ue->gnb;
     ogs_expect_or_return(gnb);

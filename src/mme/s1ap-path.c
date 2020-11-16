@@ -47,49 +47,26 @@ void s1ap_close()
     ogs_socknode_remove_all(&mme_self()->s1ap_list6);
 }
 
-int s1ap_send(ogs_sock_t *sock, ogs_pkbuf_t *pkbuf,
-        ogs_sockaddr_t *addr, uint16_t stream_no)
-{
-    int sent;
-
-    ogs_assert(sock);
-    ogs_assert(pkbuf);
-
-    sent = ogs_sctp_sendmsg(sock, pkbuf->data, pkbuf->len,
-            addr, OGS_SCTP_S1AP_PPID, stream_no);
-    if (sent < 0 || sent != pkbuf->len) {
-        ogs_error("ogs_sctp_sendmsg error (%d:%s)", errno, strerror(errno));
-        return OGS_ERROR;
-    }
-    ogs_pkbuf_free(pkbuf);
-
-    return OGS_OK;
-}
-
 int s1ap_send_to_enb(mme_enb_t *enb, ogs_pkbuf_t *pkbuf, uint16_t stream_no)
 {
     char buf[OGS_ADDRSTRLEN];
-    int rv;
 
     ogs_assert(enb);
     ogs_assert(pkbuf);
-    ogs_assert(enb->sock);
+    ogs_assert(enb->sctp.sock);
 
     ogs_debug("    IP[%s] ENB_ID[%d]",
-            OGS_ADDR(enb->addr, buf), enb->enb_id);
+            OGS_ADDR(enb->sctp.addr, buf), enb->enb_id);
 
-    rv = s1ap_send(enb->sock, pkbuf,
-            enb->sock_type == SOCK_STREAM ? NULL : enb->addr,
-            stream_no);
-    if (rv != OGS_OK) {
-        ogs_error("s1ap_send() failed");
+    ogs_sctp_ppid_in_pkbuf(pkbuf) = OGS_SCTP_S1AP_PPID;
+    ogs_sctp_stream_no_in_pkbuf(pkbuf) = stream_no;
 
-        ogs_pkbuf_free(pkbuf);
-        s1ap_event_push(MME_EVT_S1AP_LO_CONNREFUSED,
-                enb->sock, enb->addr, NULL, 0, 0);
+    if (enb->sctp.type == SOCK_STREAM) {
+        ogs_sctp_write_to_buffer(&enb->sctp, pkbuf);
+        return OGS_OK;
+    } else {
+        return ogs_sctp_senddata(enb->sctp.sock, pkbuf, enb->sctp.addr);
     }
-
-    return rv;
 }
 
 int s1ap_send_to_enb_ue(enb_ue_t *enb_ue, ogs_pkbuf_t *pkbuf)
@@ -132,7 +109,7 @@ int s1ap_delayed_send_to_enb_ue(
     }
 }
 
-int s1ap_send_to_esm(mme_ue_t *mme_ue, ogs_pkbuf_t *esmbuf)
+int s1ap_send_to_esm(mme_ue_t *mme_ue, ogs_pkbuf_t *esmbuf, uint8_t nas_type)
 {
     int rv;
     mme_event_t *e = NULL;
@@ -144,6 +121,7 @@ int s1ap_send_to_esm(mme_ue_t *mme_ue, ogs_pkbuf_t *esmbuf)
     ogs_assert(e);
     e->mme_ue = mme_ue;
     e->pkbuf = esmbuf;
+    e->nas_type = nas_type;
     rv = ogs_queue_push(ogs_app()->queue, e);
     if (rv != OGS_OK) {
         ogs_warn("ogs_queue_push() failed:%d", (int)rv);
@@ -170,6 +148,7 @@ int s1ap_send_to_nas(enb_ue_t *enb_ue,
     /* The Packet Buffer(pkbuf_t) for NAS message MUST make a HEADROOM. 
      * When calculating AES_CMAC, we need to use the headroom of the packet. */
     nasbuf = ogs_pkbuf_alloc(NULL, OGS_NAS_HEADROOM+nasPdu->size);
+    ogs_assert(nasbuf);
     ogs_pkbuf_reserve(nasbuf, OGS_NAS_HEADROOM);
     ogs_pkbuf_put_data(nasbuf, nasPdu->buf, nasPdu->size);
 
@@ -234,10 +213,14 @@ int s1ap_send_to_nas(enb_ue_t *enb_ue,
             mme_event_free(e);
         }
         return rv;
-    } else if (h->protocol_discriminator == OGS_NAS_PROTOCOL_DISCRIMINATOR_ESM) {
+    } else if (h->protocol_discriminator ==
+            OGS_NAS_PROTOCOL_DISCRIMINATOR_ESM) {
         mme_ue_t *mme_ue = enb_ue->mme_ue;
-        ogs_assert(mme_ue);
-        return s1ap_send_to_esm(mme_ue, nasbuf);
+        if (!mme_ue) {
+            ogs_error("No UE Context");
+            return OGS_ERROR;
+        }
+        return s1ap_send_to_esm(mme_ue, nasbuf, security_header_type.type);
     } else {
         ogs_error("Unknown/Unimplemented NAS Protocol discriminator 0x%02x",
                   h->protocol_discriminator);
@@ -311,31 +294,27 @@ void s1ap_send_ue_context_release_command(
     ogs_debug("    ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]",
             enb_ue->enb_ue_s1ap_id, enb_ue->mme_ue_s1ap_id);
 
-    if (delay) {
-        ogs_assert(action != S1AP_UE_CTX_REL_INVALID_ACTION);
-        enb_ue->ue_ctx_rel_action = action;
+    ogs_assert(action != S1AP_UE_CTX_REL_INVALID_ACTION);
+    enb_ue->ue_ctx_rel_action = action;
 
-        ogs_debug("    Group[%d] Cause[%d] Action[%d] Delay[%d]",
-                group, (int)cause, action, delay);
+    ogs_debug("    Group[%d] Cause[%d] Action[%d] Delay[%d]",
+            group, (int)cause, action, delay);
 
-        s1apbuf = s1ap_build_ue_context_release_command(enb_ue, group, cause);
-        ogs_expect_or_return(s1apbuf);
+    s1apbuf = s1ap_build_ue_context_release_command(enb_ue, group, cause);
+    ogs_expect_or_return(s1apbuf);
 
-        rv = s1ap_delayed_send_to_enb_ue(enb_ue, s1apbuf, delay);
-        ogs_expect(rv == OGS_OK);
-    } else {
-        ogs_assert(action != S1AP_UE_CTX_REL_INVALID_ACTION);
-        enb_ue->ue_ctx_rel_action = action;
+    rv = s1ap_delayed_send_to_enb_ue(enb_ue, s1apbuf, delay);
+    ogs_expect(rv == OGS_OK);
 
-        ogs_debug("    Group[%d] Cause[%d] Action[%d] Delay[%d]",
-                group, (int)cause, action, delay);
+    if (enb_ue->t_s1_holding)
+        ogs_timer_delete(enb_ue->t_s1_holding);
 
-        s1apbuf = s1ap_build_ue_context_release_command(enb_ue, group, cause);
-        ogs_expect_or_return(s1apbuf);
+    enb_ue->t_s1_holding = ogs_timer_add(
+            ogs_app()->timer_mgr, mme_timer_s1_holding_timer_expire, enb_ue);
+    ogs_assert(enb_ue->t_s1_holding);
 
-        rv = s1ap_delayed_send_to_enb_ue(enb_ue, s1apbuf, 0);
-        ogs_expect(rv == OGS_OK);
-    }
+    ogs_timer_start(enb_ue->t_s1_holding,
+            mme_timer_cfg(MME_TIMER_S1_HOLDING)->duration);
 }
 
 void s1ap_send_paging(mme_ue_t *mme_ue, S1AP_CNDomain_t cn_domain)
@@ -360,6 +339,7 @@ void s1ap_send_paging(mme_ue_t *mme_ue, S1AP_CNDomain_t cn_domain)
                 }
 
                 mme_ue->t3413.pkbuf = ogs_pkbuf_copy(s1apbuf);
+                ogs_assert(mme_ue->t3413.pkbuf);
 
                 rv = s1ap_send_to_enb(enb, s1apbuf, S1AP_NON_UE_SIGNALLING);
                 ogs_expect(rv == OGS_OK);
@@ -468,7 +448,7 @@ void s1ap_send_handover_request(
     ogs_assert(target_enb);
 
     ogs_assert(mme_ue);
-    source_ue = mme_ue->enb_ue;
+    source_ue = enb_ue_cycle(mme_ue->enb_ue);
     ogs_assert(source_ue);
     ogs_assert(source_ue->target_ue == NULL);
 
@@ -527,6 +507,28 @@ void s1ap_send_error_indication(
 
     rv = s1ap_send_to_enb(enb, s1apbuf, S1AP_NON_UE_SIGNALLING);
     ogs_expect(rv == OGS_OK);
+}
+
+void s1ap_send_error_indication2(
+        mme_ue_t *mme_ue, S1AP_Cause_PR group, long cause)
+{
+    mme_enb_t *enb;
+    enb_ue_t *enb_ue;
+
+    S1AP_MME_UE_S1AP_ID_t mme_ue_s1ap_id;
+    S1AP_ENB_UE_S1AP_ID_t enb_ue_s1ap_id;
+
+    ogs_assert(mme_ue);
+    enb_ue = enb_ue_cycle(mme_ue->enb_ue);
+    ogs_expect_or_return(enb_ue);
+    enb = enb_ue->enb;
+    ogs_expect_or_return(enb);
+
+    mme_ue_s1ap_id = enb_ue->mme_ue_s1ap_id,
+    enb_ue_s1ap_id = enb_ue->enb_ue_s1ap_id,
+
+    s1ap_send_error_indication(
+        enb, &mme_ue_s1ap_id, &enb_ue_s1ap_id, group, cause);
 }
 
 void s1ap_send_s1_reset_ack(

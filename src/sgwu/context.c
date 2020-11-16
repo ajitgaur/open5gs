@@ -38,6 +38,7 @@ void sgwu_context_init(void)
     ogs_log_install_domain(&__sgwu_log_domain, "sgwu", ogs_core()->log.level);
 
     /* Setup UP Function Features */
+    ogs_pfcp_self()->up_function_features.ftup = 1;
     ogs_pfcp_self()->up_function_features.empu = 1;
     ogs_pfcp_self()->up_function_features_len = 2;
 
@@ -126,10 +127,14 @@ int sgwu_context_parse_config(void)
                     do {
                         int family = AF_UNSPEC;
                         int i, num = 0;
+                        int adv_num = 0;
                         const char *hostname[OGS_MAX_NUM_OF_HOSTNAME];
+                        const char *adv_hostname[OGS_MAX_NUM_OF_HOSTNAME];
                         uint16_t port = self.gtpu_port;
                         const char *dev = NULL;
                         ogs_sockaddr_t *addr = NULL;
+                        ogs_sockaddr_t *adv_addr = NULL;
+                        ogs_sockaddr_t *adv_addr6 = NULL;
                         const char *teid_range_indication = NULL;
                         const char *teid_range = NULL;
                         const char *network_instance = NULL;
@@ -191,10 +196,34 @@ int sgwu_context_parse_config(void)
                                     }
 
                                     ogs_assert(num <= OGS_MAX_NUM_OF_HOSTNAME);
-                                    hostname[num++] = 
+                                    hostname[num++] =
                                         ogs_yaml_iter_value(&hostname_iter);
                                 } while (
                                     ogs_yaml_iter_type(&hostname_iter) ==
+                                        YAML_SEQUENCE_NODE);
+                            } else if (!strcmp(gtpu_key, "advertise_addr") ||
+                                    !strcmp(gtpu_key, "advertise_name")) {
+                                ogs_yaml_iter_t adv_hostname_iter;
+                                ogs_yaml_iter_recurse(
+                                        &gtpu_iter, &adv_hostname_iter);
+                                ogs_assert(ogs_yaml_iter_type(
+                                    &adv_hostname_iter) != YAML_MAPPING_NODE);
+
+                                do {
+                                    if (ogs_yaml_iter_type(
+                                        &adv_hostname_iter) ==
+                                            YAML_SEQUENCE_NODE) {
+                                        if (!ogs_yaml_iter_next(
+                                            &adv_hostname_iter))
+                                            break;
+                                    }
+
+                                    ogs_assert(adv_num <=
+                                            OGS_MAX_NUM_OF_HOSTNAME);
+                                    adv_hostname[adv_num++] =
+                                        ogs_yaml_iter_value(&adv_hostname_iter);
+                                } while (
+                                    ogs_yaml_iter_type(&adv_hostname_iter) ==
                                         YAML_SEQUENCE_NODE);
                             } else if (!strcmp(gtpu_key, "port")) {
                                 const char *v = ogs_yaml_iter_value(&gtpu_iter);
@@ -246,6 +275,20 @@ int sgwu_context_parse_config(void)
                             ogs_assert(rv == OGS_OK);
                         }
 
+                        adv_addr = NULL;
+                        for (i = 0; i < adv_num; i++) {
+                            rv = ogs_addaddrinfo(&adv_addr,
+                                    family, adv_hostname[i], port, 0);
+                            ogs_assert(rv == OGS_OK);
+                        }
+                        rv = ogs_copyaddrinfo(&adv_addr6, adv_addr);
+                        ogs_assert(rv == OGS_OK);
+
+                        rv = ogs_filteraddrinfo(&adv_addr, AF_INET);
+                        ogs_assert(rv == OGS_OK);
+                        rv = ogs_filteraddrinfo(&adv_addr6, AF_INET6);
+                        ogs_assert(rv == OGS_OK);
+
                         /* Find first IPv4/IPv6 address in the list.
                          *
                          * In the following configuration,
@@ -280,8 +323,10 @@ int sgwu_context_parse_config(void)
 
                             memset(&info, 0, sizeof(info));
                             ogs_pfcp_sockaddr_to_user_plane_ip_resource_info(
-                                    node ? node->addr : NULL,
-                                    node6 ? node6->addr : NULL,
+                                    adv_addr ? adv_addr :
+                                        node ? node->addr : NULL,
+                                    adv_addr6 ? adv_addr6 :
+                                        node6 ? node6->addr : NULL,
                                     &info);
 
                             if (teid_range_indication) {
@@ -308,6 +353,9 @@ int sgwu_context_parse_config(void)
                             ogs_list_add(&self.gtpu_list, iter);
                         ogs_list_for_each_safe(&list6, next_iter, iter)
                             ogs_list_add(&self.gtpu_list, iter);
+
+                        ogs_freeaddrinfo(adv_addr);
+                        ogs_freeaddrinfo(adv_addr6);
 
                     } while (ogs_yaml_iter_type(&gtpu_array) ==
                             YAML_SEQUENCE_NODE);
@@ -362,8 +410,8 @@ int sgwu_context_parse_config(void)
     return OGS_OK;
 }
 
-sgwu_sess_t *sgwu_sess_add(ogs_pfcp_f_seid_t *cp_f_seid,
-        const char *apn, uint8_t pdn_type, ogs_pfcp_pdr_id_t default_pdr_id)
+sgwu_sess_t *sgwu_sess_add(
+        ogs_pfcp_f_seid_t *cp_f_seid, const char *apn, uint8_t pdn_type)
 {
     sgwu_sess_t *sess = NULL;
 
@@ -374,11 +422,7 @@ sgwu_sess_t *sgwu_sess_add(ogs_pfcp_f_seid_t *cp_f_seid,
     ogs_assert(sess);
     memset(sess, 0, sizeof *sess);
 
-    ogs_pool_init(&sess->pfcp.pdr_pool, OGS_MAX_NUM_OF_PDR);
-    ogs_pool_init(&sess->pfcp.far_pool, OGS_MAX_NUM_OF_FAR);
-    ogs_pool_init(&sess->pfcp.urr_pool, OGS_MAX_NUM_OF_URR);
-    ogs_pool_init(&sess->pfcp.qer_pool, OGS_MAX_NUM_OF_QER);
-    ogs_pool_init(&sess->pfcp.bar_pool, OGS_MAX_NUM_OF_BAR);
+    ogs_pfcp_pool_init(&sess->pfcp);
 
     sess->index = ogs_pool_index(&sgwu_sess_pool, sess);
     ogs_assert(sess->index > 0 && sess->index <= ogs_app()->pool.sess);
@@ -396,7 +440,7 @@ sgwu_sess_t *sgwu_sess_add(ogs_pfcp_f_seid_t *cp_f_seid,
 
     ogs_list_add(&self.sess_list, sess);
 
-    ogs_info("Added a session. Number of active sessions is now %d",
+    ogs_info("[Added] Number of SGWU-Sessions is now %d",
             ogs_list_count(&self.sess_list));
 
     return sess;
@@ -412,15 +456,11 @@ int sgwu_sess_remove(sgwu_sess_t *sess)
     ogs_hash_set(self.sess_hash, &sess->sgwc_sxa_seid,
             sizeof(sess->sgwc_sxa_seid), NULL);
 
-    ogs_pool_final(&sess->pfcp.pdr_pool);
-    ogs_pool_final(&sess->pfcp.far_pool);
-    ogs_pool_final(&sess->pfcp.urr_pool);
-    ogs_pool_final(&sess->pfcp.qer_pool);
-    ogs_pool_final(&sess->pfcp.bar_pool);
+    ogs_pfcp_pool_final(&sess->pfcp);
 
     ogs_pool_free(&sgwu_sess_pool, sess);
 
-    ogs_info("Removed a session. Number of active sessions is now %d",
+    ogs_info("[Removed] Number of SGWU-sessions is now %d",
             ogs_list_count(&self.sess_list));
 
     return OGS_OK;
@@ -457,7 +497,6 @@ sgwu_sess_t *sgwu_sess_add_by_message(ogs_pfcp_message_t *message)
 
     ogs_pfcp_f_seid_t *f_seid = NULL;
     char apn[OGS_MAX_APN_LEN];
-    ogs_pfcp_pdr_id_t default_pdr_id = 0;
 
     ogs_pfcp_session_establishment_request_t *req =
         &message->pfcp_session_establishment_request;;
@@ -505,8 +544,7 @@ sgwu_sess_t *sgwu_sess_add_by_message(ogs_pfcp_message_t *message)
 
     sess = sgwu_sess_find_by_cp_seid(f_seid->seid);
     if (!sess) {
-        sess = sgwu_sess_add(
-                f_seid, apn, req->pdn_type.u8, default_pdr_id);
+        sess = sgwu_sess_add(f_seid, apn, req->pdn_type.u8);
         if (!sess) return NULL;
     }
     ogs_assert(sess);

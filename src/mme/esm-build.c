@@ -36,12 +36,12 @@ ogs_pkbuf_t *esm_build_pdn_connectivity_reject(
     mme_ue = sess->mme_ue;
     ogs_assert(mme_ue);
 
-    ogs_debug("[ESM] PDN connectivity reject");
+    ogs_debug("PDN connectivity reject");
     ogs_debug("    IMSI[%s] PTI[%d] Cause[%d]",
             mme_ue->imsi_bcd, sess->pti, esm_cause);
 
     memset(&message, 0, sizeof(message));
-    if (OGS_FSM_CHECK(&mme_ue->sm, emm_state_registered)) {
+    if (!SESSION_CONTEXT_IN_ATTACH(sess)) {
         message.h.security_header_type =
            OGS_NAS_SECURITY_HEADER_INTEGRITY_PROTECTED_AND_CIPHERED;
         message.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
@@ -53,11 +53,10 @@ ogs_pkbuf_t *esm_build_pdn_connectivity_reject(
 
     pdn_connectivity_reject->esm_cause = esm_cause;
 
-    if (OGS_FSM_CHECK(&mme_ue->sm, emm_state_registered)) {
-        return nas_eps_security_encode(mme_ue, &message);
-    } else {
+    if (SESSION_CONTEXT_IN_ATTACH(sess))
         return ogs_nas_eps_plain_encode(&message);
-    }
+    else
+        return nas_eps_security_encode(mme_ue, &message);
 }
 
 ogs_pkbuf_t *esm_build_information_request(mme_bearer_t *bearer)
@@ -72,9 +71,9 @@ ogs_pkbuf_t *esm_build_information_request(mme_bearer_t *bearer)
     mme_ue = bearer->mme_ue;
     ogs_assert(mme_ue);
 
-    ogs_debug("[ESM] ESM information request");
+    ogs_debug("ESM information request");
     ogs_debug("    IMSI[%s] PTI[%d] EBI[%d]",
-            mme_ue->imsi_bcd, sess->pti, *(bearer->ebi));
+            mme_ue->imsi_bcd, sess->pti, bearer->ebi);
 
     memset(&message, 0, sizeof(message));
     message.h.security_header_type =
@@ -122,23 +121,19 @@ ogs_pkbuf_t *esm_build_activate_default_bearer_context_request(
     ogs_assert(pdn);
     bearer = mme_default_bearer_in_sess(sess);
     ogs_assert(bearer);
+    ogs_assert(mme_bearer_next(bearer) == NULL);
 
-    if (mme_bearer_next(bearer) != NULL) {
-        ogs_error("PDN connectivity duplicated");
-        return NULL;
-    }
-
-    ogs_debug("[ESM] Activate default bearer context request");
+    ogs_debug("Activate default bearer context request");
     ogs_debug("    IMSI[%s] PTI[%d] EBI[%d]",
-            mme_ue->imsi_bcd, sess->pti, *(bearer->ebi));
+            mme_ue->imsi_bcd, sess->pti, bearer->ebi);
 
     memset(&message, 0, sizeof(message));
-    if (OGS_FSM_CHECK(&mme_ue->sm, emm_state_registered)) {
+    if (!SESSION_CONTEXT_IN_ATTACH(sess)) {
         message.h.security_header_type =
            OGS_NAS_SECURITY_HEADER_INTEGRITY_PROTECTED_AND_CIPHERED;
         message.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
     }
-    message.esm.h.eps_bearer_identity = *(bearer->ebi);
+    message.esm.h.eps_bearer_identity = bearer->ebi;
     message.esm.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_ESM;
     message.esm.h.procedure_transaction_identity = sess->pti;
     message.esm.h.message_type =
@@ -245,11 +240,10 @@ ogs_pkbuf_t *esm_build_activate_default_bearer_context_request(
         }
     }
 
-    if (OGS_FSM_CHECK(&mme_ue->sm, emm_state_registered)) {
-        return nas_eps_security_encode(mme_ue, &message);
-    } else {
+    if (SESSION_CONTEXT_IN_ATTACH(sess))
         return ogs_nas_eps_plain_encode(&message);
-    }
+    else
+        return nas_eps_security_encode(mme_ue, &message);
 }
 
 ogs_pkbuf_t *esm_build_activate_dedicated_bearer_context_request(
@@ -276,21 +270,21 @@ ogs_pkbuf_t *esm_build_activate_dedicated_bearer_context_request(
     linked_bearer = mme_linked_bearer(bearer); 
     ogs_assert(linked_bearer);
 
-    ogs_debug("[ESM] Activate dedicated bearer context request");
+    ogs_debug("Activate dedicated bearer context request");
     ogs_debug("    IMSI[%s] EBI[%d] Linked-EBI[%d]",
-            mme_ue->imsi_bcd, *(bearer->ebi), *(linked_bearer->ebi));
+            mme_ue->imsi_bcd, bearer->ebi, linked_bearer->ebi);
 
     memset(&message, 0, sizeof(message));
     message.h.security_header_type =
        OGS_NAS_SECURITY_HEADER_INTEGRITY_PROTECTED_AND_CIPHERED;
     message.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
-    message.esm.h.eps_bearer_identity = *(bearer->ebi);
+    message.esm.h.eps_bearer_identity = bearer->ebi;
     message.esm.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_ESM;
     message.esm.h.procedure_transaction_identity = 0;
     message.esm.h.message_type =
         OGS_NAS_EPS_ACTIVATE_DEDICATED_EPS_BEARER_CONTEXT_REQUEST;
 
-    linked_ebi->eps_bearer_identity = *(linked_bearer->ebi);
+    linked_ebi->eps_bearer_identity = linked_bearer->ebi;
     eps_qos_build(eps_qos, bearer->qos.qci,
             bearer->qos.mbr.downlink, bearer->qos.mbr.uplink,
             bearer->qos.gbr.downlink, bearer->qos.gbr.uplink);
@@ -324,15 +318,15 @@ ogs_pkbuf_t *esm_build_modify_bearer_context_request(
     mme_ue = bearer->mme_ue;
     ogs_assert(mme_ue);
 
-    ogs_debug("[ESM] Modify bearer context request");
+    ogs_debug("Modify bearer context request");
     ogs_debug("    IMSI[%s] PTI[%d] EBI[%d]",
-            mme_ue->imsi_bcd, sess->pti, *(bearer->ebi));
+            mme_ue->imsi_bcd, sess->pti, bearer->ebi);
 
     memset(&message, 0, sizeof(message));
     message.h.security_header_type =
        OGS_NAS_SECURITY_HEADER_INTEGRITY_PROTECTED_AND_CIPHERED;
     message.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
-    message.esm.h.eps_bearer_identity = *(bearer->ebi);
+    message.esm.h.eps_bearer_identity = bearer->ebi;
     message.esm.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_ESM;
     message.esm.h.procedure_transaction_identity = sess->pti;
     message.esm.h.message_type = OGS_NAS_EPS_MODIFY_EPS_BEARER_CONTEXT_REQUEST;
@@ -374,16 +368,16 @@ ogs_pkbuf_t *esm_build_deactivate_bearer_context_request(
     mme_ue = bearer->mme_ue;
     ogs_assert(mme_ue);
 
-    ogs_debug("[ESM] Deactivate bearer context request");
+    ogs_debug("Deactivate bearer context request");
     ogs_debug("    IMSI[%s] PTI[%d] EBI[%d]",
-            mme_ue->imsi_bcd, sess->pti, *(bearer->ebi));
+            mme_ue->imsi_bcd, sess->pti, bearer->ebi);
     ogs_debug("    Cause[%d]", esm_cause);
 
     memset(&message, 0, sizeof(message));
     message.h.security_header_type =
        OGS_NAS_SECURITY_HEADER_INTEGRITY_PROTECTED_AND_CIPHERED;
     message.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
-    message.esm.h.eps_bearer_identity = *(bearer->ebi);
+    message.esm.h.eps_bearer_identity = bearer->ebi;
     message.esm.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_ESM;
     message.esm.h.procedure_transaction_identity = sess->pti;
     message.esm.h.message_type =
@@ -411,12 +405,12 @@ ogs_pkbuf_t *esm_build_bearer_resource_allocation_reject(
     mme_ue = sess->mme_ue;
     ogs_assert(mme_ue);
 
-    ogs_debug("[ESM] Bearer resource allocation reject");
+    ogs_debug("Bearer resource allocation reject");
     ogs_debug("    IMSI[%s] PTI[%d] Cause[%d]",
             mme_ue->imsi_bcd, sess->pti, esm_cause);
 
     memset(&message, 0, sizeof(message));
-    if (OGS_FSM_CHECK(&mme_ue->sm, emm_state_registered)) {
+    if (!SESSION_CONTEXT_IN_ATTACH(sess)) {
         message.h.security_header_type =
            OGS_NAS_SECURITY_HEADER_INTEGRITY_PROTECTED_AND_CIPHERED;
         message.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
@@ -429,11 +423,10 @@ ogs_pkbuf_t *esm_build_bearer_resource_allocation_reject(
 
     bearer_resource_allocation_reject->esm_cause = esm_cause;
 
-    if (OGS_FSM_CHECK(&mme_ue->sm, emm_state_registered)) {
-        return nas_eps_security_encode(mme_ue, &message);
-    } else {
+    if (SESSION_CONTEXT_IN_ATTACH(sess))
         return ogs_nas_eps_plain_encode(&message);
-    }
+    else
+        return nas_eps_security_encode(mme_ue, &message);
 }
 
 ogs_pkbuf_t *esm_build_bearer_resource_modification_reject(
@@ -453,12 +446,12 @@ ogs_pkbuf_t *esm_build_bearer_resource_modification_reject(
     mme_ue = sess->mme_ue;
     ogs_assert(mme_ue);
 
-    ogs_debug("[ESM] Bearer resource modification reject");
+    ogs_debug("Bearer resource modification reject");
     ogs_debug("    IMSI[%s] PTI[%d] Cause[%d]",
             mme_ue->imsi_bcd, sess->pti, esm_cause);
 
     memset(&message, 0, sizeof(message));
-    if (OGS_FSM_CHECK(&mme_ue->sm, emm_state_registered)) {
+    if (!SESSION_CONTEXT_IN_ATTACH(sess)) {
         message.h.security_header_type =
            OGS_NAS_SECURITY_HEADER_INTEGRITY_PROTECTED_AND_CIPHERED;
         message.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
@@ -472,9 +465,8 @@ ogs_pkbuf_t *esm_build_bearer_resource_modification_reject(
 
     bearer_resource_modification_reject->esm_cause = esm_cause;
 
-    if (OGS_FSM_CHECK(&mme_ue->sm, emm_state_registered)) {
-        return nas_eps_security_encode(mme_ue, &message);
-    } else {
+    if (SESSION_CONTEXT_IN_ATTACH(sess))
         return ogs_nas_eps_plain_encode(&message);
-    }
+    else
+        return nas_eps_security_encode(mme_ue, &message);
 }

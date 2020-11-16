@@ -49,42 +49,13 @@ static OGS_POOL(mme_bearer_pool, mme_bearer_t);
 
 static int context_initialized = 0;
 
-int num_ues = 0;
-int num_enbs = 0;
-int num_mme_sessions = 0;
+static int num_of_enb_ue = 0;
+static int num_of_mme_sess = 0;
 
-void stats_add_ue(void) {
-    num_ues = num_ues + 1;
-    ogs_info("Added a UE. Number of UEs is now %d", num_ues);
-}
-
-void stats_remove_ue(void) {
-    num_ues = num_ues - 1;
-    ogs_info("Removed a UE. Number of UEs is now %d", num_ues);
-}
-
-void stats_add_enb(void) {
-    num_enbs = num_enbs + 1;
-    ogs_info("Added a eNB. Number of eNBs is now %d", num_enbs);
-}
-
-void stats_remove_enb(void) {
-    num_enbs = num_enbs - 1;
-    ogs_info("Removed a eNB. Number of eNBs is now %d", num_enbs);
-}
-
-void stats_add_mme_session(void) {
-    num_mme_sessions = num_mme_sessions + 1;
-    ogs_info("Added a session. Number of sessions is now %d",
-            num_mme_sessions);
-}
-
-void stats_remove_mme_session(void) {
-    num_mme_sessions = num_mme_sessions - 1;
-    ogs_info("Removed a session. Number of sessions is now %d",
-            num_mme_sessions);
-}
-
+static void stats_add_enb_ue(void);
+static void stats_remove_enb_ue(void);
+static void stats_add_mme_session(void);
+static void stats_remove_mme_session(void);
 
 void mme_context_init()
 {
@@ -1759,7 +1730,7 @@ ogs_sockaddr_t *mme_pgw_addr_find_by_apn(
 
         while (addr) {
             if (addr->ogs_sa_family == family &&
-                (!apn || (pgw->apn && !strcmp(apn, pgw->apn)))) {
+                (!apn || (pgw->apn && !ogs_strcasecmp(apn, pgw->apn)))) {
                 return addr;
             }
             addr = addr->next;
@@ -1908,9 +1879,17 @@ mme_enb_t *mme_enb_add(ogs_sock_t *sock, ogs_sockaddr_t *addr)
     ogs_assert(enb);
     memset(enb, 0, sizeof *enb);
 
-    enb->sock = sock;
-    enb->addr = addr;
-    enb->sock_type = mme_enb_sock_type(enb->sock);
+    enb->sctp.sock = sock;
+    enb->sctp.addr = addr;
+    enb->sctp.type = mme_enb_sock_type(enb->sctp.sock);
+
+    if (enb->sctp.type == SOCK_STREAM) {
+        enb->sctp.poll.read = ogs_pollset_add(ogs_app()->pollset,
+            OGS_POLLIN, sock->fd, s1ap_recv_upcall, sock);
+        ogs_assert(enb->sctp.poll.read);
+
+        ogs_list_init(&enb->sctp.write_queue);
+    }
 
     enb->max_num_of_ostreams = DEFAULT_SCTP_MAX_NUM_OF_OSTREAMS;
     enb->ostream_id = 0;
@@ -1922,13 +1901,8 @@ mme_enb_t *mme_enb_add(ogs_sock_t *sock, ogs_sockaddr_t *addr)
 
     ogs_list_init(&enb->enb_ue_list);
 
-    if (enb->sock_type == SOCK_STREAM) {
-        enb->poll = ogs_pollset_add(ogs_app()->pollset,
-            OGS_POLLIN, sock->fd, s1ap_recv_upcall, sock);
-        ogs_assert(enb->poll);
-    }
-
-    ogs_hash_set(self.enb_addr_hash, enb->addr, sizeof(ogs_sockaddr_t), enb);
+    ogs_hash_set(self.enb_addr_hash,
+            enb->sctp.addr, sizeof(ogs_sockaddr_t), enb);
 
     memset(&e, 0, sizeof(e));
     e.enb = enb;
@@ -1937,7 +1911,8 @@ mme_enb_t *mme_enb_add(ogs_sock_t *sock, ogs_sockaddr_t *addr)
 
     ogs_list_add(&self.enb_list, enb);
 
-    stats_add_enb();
+    ogs_info("[Added] Number of eNBs is now %d",
+            ogs_list_count(&self.enb_list));
 
     return enb;
 }
@@ -1947,7 +1922,7 @@ int mme_enb_remove(mme_enb_t *enb)
     mme_event_t e;
 
     ogs_assert(enb);
-    ogs_assert(enb->sock);
+    ogs_assert(enb->sctp.sock);
 
     ogs_list_remove(&self.enb_list, enb);
 
@@ -1956,21 +1931,16 @@ int mme_enb_remove(mme_enb_t *enb)
     ogs_fsm_fini(&enb->sm, &e);
     ogs_fsm_delete(&enb->sm);
 
-    ogs_hash_set(self.enb_addr_hash, enb->addr, sizeof(ogs_sockaddr_t), NULL);
+    ogs_hash_set(self.enb_addr_hash,
+            enb->sctp.addr, sizeof(ogs_sockaddr_t), NULL);
     ogs_hash_set(self.enb_id_hash, &enb->enb_id, sizeof(enb->enb_id), NULL);
 
-    enb_ue_remove_in_enb(enb);
-
-    if (enb->sock_type == SOCK_STREAM) {
-        ogs_pollset_remove(enb->poll);
-        ogs_sctp_destroy(enb->sock);
-    }
-
-    ogs_free(enb->addr);
+    ogs_sctp_flush_and_destroy(&enb->sctp);
 
     ogs_pool_free(&mme_enb_pool, enb);
 
-    stats_remove_enb();
+    ogs_info("[Removed] Number of eNBs is now %d",
+            ogs_list_count(&self.enb_list));
 
     return OGS_OK;
 }
@@ -2054,38 +2024,27 @@ enb_ue_t *enb_ue_add(mme_enb_t *enb, uint32_t enb_ue_s1ap_id)
 
     ogs_list_add(&enb->enb_ue_list, enb_ue);
 
-    stats_add_ue();
+    stats_add_enb_ue();
 
     return enb_ue;
 }
 
 void enb_ue_remove(enb_ue_t *enb_ue)
 {
+    mme_enb_t *enb = NULL;
+
     ogs_assert(enb_ue);
-    ogs_assert(enb_ue->enb);
+    enb = enb_ue->enb;
+    ogs_assert(enb);
 
-    /* De-associate S1 with NAS/EMM */
-    enb_ue_deassociate(enb_ue);
+    ogs_list_remove(&enb->enb_ue_list, enb_ue);
 
-    ogs_list_remove(&enb_ue->enb->enb_ue_list, enb_ue);
-
-    stats_remove_ue();
+    if (enb_ue->t_s1_holding)
+        ogs_timer_delete(enb_ue->t_s1_holding);
 
     ogs_pool_free(&enb_ue_pool, enb_ue);
-}
 
-void enb_ue_remove_in_enb(mme_enb_t *enb)
-{
-    enb_ue_t *enb_ue = NULL, *next_enb_ue = NULL;
-    
-    enb_ue = enb_ue_first_in_enb(enb);
-    while (enb_ue) {
-        next_enb_ue = enb_ue_next_in_enb(enb_ue);
-
-        enb_ue_remove(enb_ue);
-
-        enb_ue = next_enb_ue;
-    }
+    stats_remove_enb_ue();
 }
 
 void enb_ue_switch_to_enb(enb_ue_t *enb_ue, mme_enb_t *new_enb)
@@ -2109,12 +2068,9 @@ enb_ue_t *enb_ue_find_by_enb_ue_s1ap_id(
 {
     enb_ue_t *enb_ue = NULL;
     
-    enb_ue = enb_ue_first_in_enb(enb);
-    while (enb_ue) {
+    ogs_list_for_each(&enb->enb_ue_list, enb_ue) {
         if (enb_ue_s1ap_id == enb_ue->enb_ue_s1ap_id)
             break;
-
-        enb_ue = enb_ue_next_in_enb(enb_ue);
     }
 
     return enb_ue;
@@ -2131,14 +2087,9 @@ enb_ue_t *enb_ue_find_by_mme_ue_s1ap_id(uint32_t mme_ue_s1ap_id)
     return enb_ue_find(mme_ue_s1ap_id);
 }
 
-enb_ue_t *enb_ue_first_in_enb(mme_enb_t *enb)
+enb_ue_t *enb_ue_cycle(enb_ue_t *enb_ue)
 {
-    return ogs_list_first(&enb->enb_ue_list);
-}
-
-enb_ue_t *enb_ue_next_in_enb(enb_ue_t *enb_ue)
-{
-    return ogs_list_next(enb_ue);
+    return ogs_pool_cycle(&enb_ue_pool, enb_ue);
 }
 
 static int mme_ue_new_guti(mme_ue_t *mme_ue)
@@ -2218,7 +2169,6 @@ mme_ue_t *mme_ue_add(enb_ue_t *enb_ue)
 {
     mme_enb_t *enb = NULL;
     mme_ue_t *mme_ue = NULL;
-    mme_event_t e;
 
     char buf[OGS_ADDRSTRLEN];
 
@@ -2275,29 +2225,23 @@ mme_ue_t *mme_ue_add(enb_ue_t *enb_ue)
             ogs_app()->timer_mgr, mme_timer_t3470_expire, mme_ue);
     mme_ue->t3470.pkbuf = NULL;
 
-    /* Create FSM */
-    memset(&e, 0, sizeof(e));
-    e.mme_ue = mme_ue;
-    ogs_fsm_create(&mme_ue->sm, emm_state_initial, emm_state_final);
-    ogs_fsm_init(&mme_ue->sm, &e);
+    mme_ue_fsm_init(mme_ue);
 
     ogs_list_add(&self.mme_ue_list, mme_ue);
+
+    ogs_info("[Added] Number of MME-UEs is now %d",
+            ogs_list_count(&self.mme_ue_list));
 
     return mme_ue;
 }
 
 void mme_ue_remove(mme_ue_t *mme_ue)
 {
-    mme_event_t e;
-
     ogs_assert(mme_ue);
 
     ogs_list_remove(&self.mme_ue_list, mme_ue);
 
-    memset(&e, 0, sizeof(e));
-    e.mme_ue = mme_ue;
-    ogs_fsm_fini(&mme_ue->sm, &e);
-    ogs_fsm_delete(&mme_ue->sm);
+    mme_ue_fsm_fini(mme_ue);
 
     /* Clear hash table */
     if (mme_ue->m_tmsi) {
@@ -2333,17 +2277,44 @@ void mme_ue_remove(mme_ue_t *mme_ue)
     mme_sess_remove_all(mme_ue);
     mme_pdn_remove_all(mme_ue);
 
-    ogs_pool_final(&mme_ue->ebi_pool);
+    mme_ebi_pool_final(mme_ue);
 
     ogs_pool_free(&mme_ue_pool, mme_ue);
+
+    ogs_info("[Removed] Number of MME-UEs is now %d",
+            ogs_list_count(&self.mme_ue_list));
 }
 
-void mme_ue_remove_all()
+void mme_ue_remove_all(void)
 {
     mme_ue_t *mme_ue = NULL, *next = NULL;;
 
     ogs_list_for_each_safe(&self.mme_ue_list, next, mme_ue)
         mme_ue_remove(mme_ue);
+}
+
+void mme_ue_fsm_init(mme_ue_t *mme_ue)
+{
+    mme_event_t e;
+
+    ogs_assert(mme_ue);
+
+    memset(&e, 0, sizeof(e));
+    e.mme_ue = mme_ue;
+    ogs_fsm_create(&mme_ue->sm, emm_state_initial, emm_state_final);
+    ogs_fsm_init(&mme_ue->sm, &e);
+}
+
+void mme_ue_fsm_fini(mme_ue_t *mme_ue)
+{
+    mme_event_t e;
+
+    ogs_assert(mme_ue);
+
+    memset(&e, 0, sizeof(e));
+    e.mme_ue = mme_ue;
+    ogs_fsm_fini(&mme_ue->sm, &e);
+    ogs_fsm_delete(&mme_ue->sm);
 }
 
 mme_ue_t *mme_ue_find_by_imsi_bcd(char *imsi_bcd)
@@ -2406,9 +2377,9 @@ mme_ue_t *mme_ue_find_by_message(ogs_nas_eps_message_t *message)
 
             mme_ue = mme_ue_find_by_imsi_bcd(imsi_bcd);
             if (mme_ue) {
-                ogs_trace("known UE by IMSI[%s]", imsi_bcd);
+                ogs_info("[%s] known UE by IMSI", imsi_bcd);
             } else {
-                ogs_trace("Unknown UE by IMSI[%s]", imsi_bcd);
+                ogs_info("[%s] Unknown UE by IMSI", imsi_bcd);
             }
             break;
         case OGS_NAS_EPS_MOBILE_IDENTITY_GUTI:
@@ -2421,12 +2392,13 @@ mme_ue_t *mme_ue_find_by_message(ogs_nas_eps_message_t *message)
 
             mme_ue = mme_ue_find_by_guti(&ogs_nas_guti);
             if (mme_ue) {
-                ogs_trace("Known UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
+                ogs_info("[%s] Known UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
+                        mme_ue->imsi_bcd,
                         ogs_nas_guti.mme_gid,
                         ogs_nas_guti.mme_code,
                         ogs_nas_guti.m_tmsi);
             } else {
-                ogs_warn("Unknown UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
+                ogs_info("Unknown UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
                         ogs_nas_guti.mme_gid,
                         ogs_nas_guti.mme_code,
                         ogs_nas_guti.m_tmsi);
@@ -2455,12 +2427,13 @@ mme_ue_t *mme_ue_find_by_message(ogs_nas_eps_message_t *message)
 
             mme_ue = mme_ue_find_by_guti(&ogs_nas_guti);
             if (mme_ue) {
-                ogs_trace("Known UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
+                ogs_info("[%s] Known UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
+                        mme_ue->imsi_bcd,
                         ogs_nas_guti.mme_gid,
                         ogs_nas_guti.mme_code,
                         ogs_nas_guti.m_tmsi);
             } else {
-                ogs_warn("Unknown UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
+                ogs_info("Unknown UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
                         ogs_nas_guti.mme_gid,
                         ogs_nas_guti.mme_code,
                         ogs_nas_guti.m_tmsi);
@@ -2489,12 +2462,13 @@ mme_ue_t *mme_ue_find_by_message(ogs_nas_eps_message_t *message)
 
             mme_ue = mme_ue_find_by_guti(&ogs_nas_guti);
             if (mme_ue) {
-                ogs_trace("Known UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
+                ogs_info("[%s] Known UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
+                        mme_ue->imsi_bcd,
                         ogs_nas_guti.mme_gid,
                         ogs_nas_guti.mme_code,
                         ogs_nas_guti.m_tmsi);
             } else {
-                ogs_warn("Unknown UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
+                ogs_info("Unknown UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
                         ogs_nas_guti.mme_gid,
                         ogs_nas_guti.mme_code,
                         ogs_nas_guti.m_tmsi);
@@ -2526,9 +2500,16 @@ int mme_ue_set_imsi(mme_ue_t *mme_ue, char *imsi_bcd)
         /* Check if OLD mme_ue_t is different with NEW mme_ue_t */
         if (ogs_pool_index(&mme_ue_pool, mme_ue) !=
             ogs_pool_index(&mme_ue_pool, old_mme_ue)) {
-            ogs_warn("OLD UE Context Release [IMSI:%s]", mme_ue->imsi_bcd);
-            if (old_mme_ue->enb_ue)
-                enb_ue_deassociate(old_mme_ue->enb_ue);
+            ogs_warn("[%s] OLD UE Context Release", mme_ue->imsi_bcd);
+            if (ECM_CONNECTED(old_mme_ue)) {
+                /* Implcit S1 release */
+                ogs_info("[%s] Implicit S1 release", mme_ue->imsi_bcd);
+                ogs_info("[%s]    ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]",
+                        old_mme_ue->imsi_bcd,
+                        old_mme_ue->enb_ue->enb_ue_s1ap_id,
+                        old_mme_ue->enb_ue->mme_ue_s1ap_id);
+                enb_ue_remove(old_mme_ue->enb_ue);
+            }
             mme_ue_remove(old_mme_ue);
         }
     }
@@ -2540,47 +2521,56 @@ int mme_ue_set_imsi(mme_ue_t *mme_ue, char *imsi_bcd)
     return OGS_OK;
 }
 
-int mme_ue_have_indirect_tunnel(mme_ue_t *mme_ue)
+bool mme_ue_have_indirect_tunnel(mme_ue_t *mme_ue)
 {
     mme_sess_t *sess = NULL;
+    mme_bearer_t *bearer = NULL;
 
-    sess = mme_sess_first(mme_ue);
-    while (sess) {
-        mme_bearer_t *bearer = mme_bearer_first(sess);
-        while (bearer) {
+    ogs_assert(mme_ue);
+
+    ogs_list_for_each(&mme_ue->sess_list, sess) {
+        ogs_list_for_each(&sess->bearer_list, bearer) {
             if (MME_HAVE_ENB_DL_INDIRECT_TUNNEL(bearer) ||
                 MME_HAVE_ENB_UL_INDIRECT_TUNNEL(bearer) ||
                 MME_HAVE_SGW_DL_INDIRECT_TUNNEL(bearer) ||
                 MME_HAVE_SGW_UL_INDIRECT_TUNNEL(bearer)) {
-                return 1;
+                return true;
             }
-
-            bearer = mme_bearer_next(bearer);
         }
-        sess = mme_sess_next(sess);
     }
 
-    return 0;
+    return false;
 }
 
-int mme_ue_clear_indirect_tunnel(mme_ue_t *mme_ue)
+void mme_ue_clear_indirect_tunnel(mme_ue_t *mme_ue)
 {
     mme_sess_t *sess = NULL;
+    mme_bearer_t *bearer = NULL;
 
     ogs_assert(mme_ue);
 
-    sess = mme_sess_first(mme_ue);
-    while (sess) {
-        mme_bearer_t *bearer = mme_bearer_first(sess);
-        while (bearer) {
+    ogs_list_for_each(&mme_ue->sess_list, sess) {
+        ogs_list_for_each(&sess->bearer_list, bearer) {
             CLEAR_INDIRECT_TUNNEL(bearer);
-
-            bearer = mme_bearer_next(bearer);
         }
-        sess = mme_sess_next(sess);
+    }
+}
+
+bool mme_ue_have_active_eps_bearers(mme_ue_t *mme_ue)
+{
+    mme_sess_t *sess = NULL;
+    mme_bearer_t *bearer = NULL;
+
+    ogs_assert(mme_ue);
+
+    ogs_list_for_each(&mme_ue->sess_list, sess) {
+        ogs_list_for_each(&sess->bearer_list, bearer) {
+            if (OGS_FSM_CHECK(&bearer->sm, esm_state_active))
+                return true;
+        }
     }
 
-    return OGS_OK;
+    return false;
 }
 
 void mme_ue_associate_enb_ue(mme_ue_t *mme_ue, enb_ue_t *enb_ue)
@@ -2673,10 +2663,13 @@ mme_sess_t *mme_sess_add(mme_ue_t *mme_ue, uint8_t pti)
 
 void mme_sess_remove(mme_sess_t *sess)
 {
+    mme_ue_t *mme_ue = NULL;
+
     ogs_assert(sess);
-    ogs_assert(sess->mme_ue);
+    mme_ue = sess->mme_ue;
+    ogs_assert(mme_ue);
     
-    ogs_list_remove(&sess->mme_ue->sess_list, sess);
+    ogs_list_remove(&mme_ue->sess_list, sess);
 
     mme_bearer_remove_all(sess);
 
@@ -2734,7 +2727,7 @@ mme_sess_t *mme_sess_find_by_apn(mme_ue_t *mme_ue, char *apn)
 
     sess = mme_sess_first(mme_ue);
     while (sess) {
-        if (sess->pdn && strcmp(sess->pdn->apn, apn) == 0)
+        if (sess->pdn && ogs_strcasecmp(sess->pdn->apn, apn) == 0)
             return sess;
 
         sess = mme_sess_next(sess);
@@ -2751,6 +2744,17 @@ mme_sess_t *mme_sess_first(mme_ue_t *mme_ue)
 mme_sess_t *mme_sess_next(mme_sess_t *sess)
 {
     return ogs_list_next(sess);
+}
+
+bool mme_sess_in_attach(mme_sess_t *sess)
+{
+    mme_ue_t *mme_ue = NULL;
+
+    ogs_assert(sess);
+    mme_ue = sess->mme_ue;
+    ogs_assert(mme_ue);
+
+    return (ogs_list_count(&mme_ue->sess_list) <= 1);
 }
 
 unsigned int mme_sess_count(mme_ue_t *mme_ue)
@@ -2782,11 +2786,13 @@ mme_bearer_t *mme_bearer_add(mme_sess_t *sess)
     ogs_assert(bearer);
     memset(bearer, 0, sizeof *bearer);
 
-    ogs_pool_alloc(&mme_ue->ebi_pool, &bearer->ebi);
-    ogs_assert(bearer->ebi);
+    ogs_pool_alloc(&mme_ue->ebi_pool, &bearer->ebi_node);
+    ogs_assert(bearer->ebi_node);
 
-    ogs_assert(*(bearer->ebi) >= MIN_EPS_BEARER_ID &&
-                *(bearer->ebi) <= MAX_EPS_BEARER_ID);
+    bearer->ebi = *(bearer->ebi_node);
+
+    ogs_assert(bearer->ebi >= MIN_EPS_BEARER_ID &&
+                bearer->ebi <= MAX_EPS_BEARER_ID);
 
     bearer->mme_ue = mme_ue;
     bearer->sess = sess;
@@ -2825,8 +2831,8 @@ void mme_bearer_remove(mme_bearer_t *bearer)
 
     OGS_TLV_CLEAR_DATA(&bearer->tft);
 
-    ogs_assert(bearer->ebi);
-    ogs_pool_free(&bearer->mme_ue->ebi_pool, bearer->ebi);
+    ogs_assert(bearer->ebi_node);
+    ogs_pool_free(&bearer->mme_ue->ebi_pool, bearer->ebi_node);
     
     ogs_pool_free(&mme_bearer_pool, bearer);
 }
@@ -2855,7 +2861,7 @@ mme_bearer_t *mme_bearer_find_by_sess_ebi(mme_sess_t *sess, uint8_t ebi)
 
     bearer = mme_bearer_first(sess);
     while (bearer) {
-        if (ebi == *(bearer->ebi))
+        if (ebi == bearer->ebi)
             return bearer;
 
         bearer = mme_bearer_next(bearer);
@@ -3003,7 +3009,14 @@ mme_bearer_t *mme_bearer_find_or_add_by_message(
         ogs_assert(sess);
     } else {
         sess = mme_sess_find_by_pti(mme_ue, pti);
-        ogs_assert(sess);
+        if (!sess) {
+            ogs_error("No Session : ESM message type[%d], PTI[%d]",
+                    message->esm.h.message_type, pti);
+            nas_eps_send_attach_reject(mme_ue,
+                EMM_CAUSE_PROTOCOL_ERROR_UNSPECIFIED,
+                ESM_CAUSE_PROTOCOL_ERROR_UNSPECIFIED);
+            return NULL;
+        }
     }
 
     bearer = mme_default_bearer_in_sess(sess);
@@ -3042,44 +3055,9 @@ mme_bearer_t *mme_bearer_next(mme_bearer_t *bearer)
     return ogs_list_next(bearer);
 }
 
-int mme_bearer_is_inactive(mme_ue_t *mme_ue)
+mme_bearer_t *mme_bearer_cycle(mme_bearer_t *bearer)
 {
-    mme_sess_t *sess = NULL;
-    ogs_assert(mme_ue);
-
-    sess = mme_sess_first(mme_ue);
-    while (sess) {
-        mme_bearer_t *bearer = mme_bearer_first(sess);
-        while (bearer) {
-            if (MME_HAVE_ENB_S1U_PATH(bearer)) {
-                return 0;
-            }
-
-            bearer = mme_bearer_next(bearer);
-        }
-        sess = mme_sess_next(sess);
-    }
-
-    return 1;
-}
-
-int mme_bearer_set_inactive(mme_ue_t *mme_ue)
-{
-    mme_sess_t *sess = NULL;
-
-    ogs_assert(mme_ue);
-    sess = mme_sess_first(mme_ue);
-    while (sess) {
-        mme_bearer_t *bearer = mme_bearer_first(sess);
-        while (bearer) {
-            CLEAR_ENB_S1U_PATH(bearer);
-
-            bearer = mme_bearer_next(bearer);
-        }
-        sess = mme_sess_next(sess);
-    }
-
-    return OGS_OK;
+    return ogs_pool_cycle(&mme_bearer_pool, bearer);
 }
 
 void mme_pdn_remove_all(mme_ue_t *mme_ue)
@@ -3107,7 +3085,7 @@ ogs_pdn_t *mme_pdn_find_by_apn(mme_ue_t *mme_ue, char *apn)
 
     for (i = 0; i < subscription_data->num_of_pdn; i++) {
         pdn = &subscription_data->pdn[i];
-        if (strcmp(pdn->apn, apn) == 0)
+        if (ogs_strcasecmp(pdn->apn, apn) == 0)
             return pdn;
     }
 
@@ -3238,7 +3216,7 @@ void mme_ebi_pool_init(mme_ue_t *mme_ue)
 
     ogs_assert(mme_ue);
 
-    ogs_pool_init(&mme_ue->ebi_pool, MAX_EPS_BEARER_ID - MIN_EPS_BEARER_ID + 1);
+    ogs_index_init(&mme_ue->ebi_pool, MAX_EPS_BEARER_ID-MIN_EPS_BEARER_ID+1);
 
     for (i = MIN_EPS_BEARER_ID, index = 0;
             i <= MAX_EPS_BEARER_ID; i++, index++) {
@@ -3248,7 +3226,20 @@ void mme_ebi_pool_init(mme_ue_t *mme_ue)
 
 void mme_ebi_pool_final(mme_ue_t *mme_ue)
 {
-    ogs_pool_final_skip_mem_checks(&mme_ue->ebi_pool);
+    ogs_assert(mme_ue);
+
+    ogs_index_final(&mme_ue->ebi_pool);
+}
+
+void mme_ebi_pool_clear(mme_ue_t *mme_ue)
+{
+    ogs_assert(mme_ue);
+
+    ogs_free(mme_ue->ebi_pool.free);
+    ogs_free(mme_ue->ebi_pool.array);
+    ogs_free(mme_ue->ebi_pool.index);
+
+    mme_ebi_pool_init(mme_ue);
 }
 
 uint8_t mme_selected_int_algorithm(mme_ue_t *mme_ue)
@@ -3281,4 +3272,28 @@ uint8_t mme_selected_enc_algorithm(mme_ue_t *mme_ue)
     }
 
     return 0;
+}
+
+static void stats_add_enb_ue(void)
+{
+    num_of_enb_ue = num_of_enb_ue + 1;
+    ogs_info("[Added] Number of eNB-UEs is now %d", num_of_enb_ue);
+}
+
+static void stats_remove_enb_ue(void)
+{
+    num_of_enb_ue = num_of_enb_ue - 1;
+    ogs_info("[Removed] Number of eNB-UEs is now %d", num_of_enb_ue);
+}
+
+static void stats_add_mme_session(void)
+{
+    num_of_mme_sess = num_of_mme_sess + 1;
+    ogs_info("[Added] Number of MME-Sessions is now %d", num_of_mme_sess);
+}
+
+static void stats_remove_mme_session(void)
+{
+    num_of_mme_sess = num_of_mme_sess - 1;
+    ogs_info("[Removed] Number of MME-Sessions is now %d", num_of_mme_sess);
 }

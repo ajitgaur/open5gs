@@ -30,21 +30,22 @@ static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
     ssize_t size;
     char buf[OGS_ADDRSTRLEN];
 
+    sgwu_sess_t *sess = NULL;
+
     ogs_pkbuf_t *pkbuf = NULL;
     ogs_sockaddr_t from;
 
     ogs_gtp_header_t *gtp_h = NULL;
-    struct ip *ip_h = NULL;
+    ogs_pfcp_user_plane_report_t report;
 
     uint32_t teid;
     uint8_t qfi;
-    ogs_pfcp_pdr_t *pdr = NULL;
-    ogs_pfcp_user_plane_report_t report;
 
     ogs_assert(fd != INVALID_SOCKET);
 
-    pkbuf = ogs_pkbuf_alloc(packet_pool, OGS_MAX_SDU_LEN);
-    ogs_pkbuf_put(pkbuf, OGS_MAX_SDU_LEN);
+    pkbuf = ogs_pkbuf_alloc(packet_pool, OGS_MAX_PKT_LEN);
+    ogs_assert(pkbuf);
+    ogs_pkbuf_put(pkbuf, OGS_MAX_PKT_LEN);
 
     size = ogs_recvfrom(fd, pkbuf->data, pkbuf->len, 0, &from);
     if (size <= 0) {
@@ -88,25 +89,8 @@ static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
 
     teid = be32toh(gtp_h->teid);
 
-    if (gtp_h->type == OGS_GTPU_MSGTYPE_END_MARKER) {
-        ogs_debug("[RECV] End Marker from [%s] : TEID[0x%x]",
-                OGS_ADDR(&from, buf), teid);
-        goto cleanup;
-    }
-
-    if (gtp_h->type == OGS_GTPU_MSGTYPE_ERR_IND) {
-        ogs_error("[RECV] Error Indication from [%s]", OGS_ADDR(&from, buf));
-        goto cleanup;
-    }
-
-    if (gtp_h->type != OGS_GTPU_MSGTYPE_GPDU) {
-        ogs_error("[DROP] Invalid GTPU Type [%d]", gtp_h->type);
-        ogs_log_hexdump(OGS_LOG_ERROR, pkbuf->data, pkbuf->len);
-        goto cleanup;
-    }
-
-    ogs_debug("[RECV] GPU-U from [%s] : TEID[0x%x]",
-            OGS_ADDR(&from, buf), teid);
+    ogs_debug("[RECV] GPU-U Type [%d] from [%s] : TEID[0x%x]",
+            gtp_h->type, OGS_ADDR(&from, buf), teid);
 
     qfi = 0;
     if (gtp_h->flags & OGS_GTPU_FLAGS_E) {
@@ -141,46 +125,80 @@ static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
     }
     ogs_assert(ogs_pkbuf_pull(pkbuf, len));
 
-    ip_h = (struct ip *)pkbuf->data;
-    ogs_assert(ip_h);
+    if (gtp_h->type == OGS_GTPU_MSGTYPE_END_MARKER) {
+        /* Nothing */
 
-    pdr = ogs_pfcp_pdr_find_by_teid_and_qfi(teid, qfi);
-    if (!pdr) {
-        ogs_warn("[DROP] Cannot find PDR : TEID[0x%x] QFI[%d]",
-                teid, qfi);
-        goto cleanup;
-    }
+    } else if (gtp_h->type == OGS_GTPU_MSGTYPE_ERR_IND) {
+        ogs_pfcp_far_t *far = NULL;
 
-    ogs_pfcp_up_handle_pdr(pdr, pkbuf, &report);
+        far = ogs_pfcp_far_find_by_error_indication(pkbuf);
+        if (far) {
+            ogs_pfcp_up_handle_error_indication(far, &report);
 
-    if (report.type.downlink_data_report) {
-        sgwu_sess_t *sess = NULL;
+            if (report.type.error_indication_report) {
+                ogs_assert(far->sess);
+                sess = SGWU_SESS(far->sess);
+                ogs_assert(sess);
 
-        ogs_assert(pdr->sess);
-        sess = SGWU_SESS(pdr->sess);
-        ogs_assert(sess);
+                sgwu_pfcp_send_session_report_request(sess, &report);
+            }
 
-        report.downlink_data.pdr_id = pdr->id;
-        report.downlink_data.qfi = qfi; /* for 5GC */
+        } else {
+            ogs_error("[DROP] Cannot decode Error-Indication");
+            ogs_log_hexdump(OGS_LOG_ERROR, pkbuf->data, pkbuf->len);
+        }
+    } else if (gtp_h->type == OGS_GTPU_MSGTYPE_GPDU) {
+        struct ip *ip_h = NULL;
+        ogs_pfcp_pdr_t *pdr = NULL;
 
-        sgwu_pfcp_send_session_report_request(sess, &report);
+        ip_h = (struct ip *)pkbuf->data;
+        ogs_assert(ip_h);
+
+        pdr = ogs_pfcp_pdr_find_by_teid_and_qfi(teid, qfi);
+        if (pdr) {
+            ogs_pfcp_up_handle_pdr(pdr, pkbuf, &report);
+
+            if (report.type.downlink_data_report) {
+                ogs_assert(pdr->sess);
+                sess = SGWU_SESS(pdr->sess);
+                ogs_assert(sess);
+
+                report.downlink_data.pdr_id = pdr->id;
+                report.downlink_data.qfi = qfi; /* for 5GC */
+
+                sgwu_pfcp_send_session_report_request(sess, &report);
+            }
+        }
+    } else {
+        ogs_error("[DROP] Invalid GTPU Type [%d]", gtp_h->type);
+        ogs_log_hexdump(OGS_LOG_ERROR, pkbuf->data, pkbuf->len);
     }
 
 cleanup:
     ogs_pkbuf_free(pkbuf);
 }
 
+int sgwu_gtp_init(void)
+{
+    ogs_pkbuf_config_t config;
+    memset(&config, 0, sizeof config);
+
+    config.cluster_2048_pool = ogs_app()->pool.packet;
+
+    packet_pool = ogs_pkbuf_pool_create(&config);
+
+    return OGS_OK;
+}
+
+void sgwu_gtp_final(void)
+{
+    ogs_pkbuf_pool_destroy(packet_pool);
+}
+
 int sgwu_gtp_open(void)
 {
     ogs_socknode_t *node = NULL;
     ogs_sock_t *sock = NULL;
-
-    ogs_pkbuf_config_t config;
-    memset(&config, 0, sizeof config);
-
-    config.cluster_8192_pool = ogs_app()->pool.packet;
-
-    packet_pool = ogs_pkbuf_pool_create(&config);
 
     ogs_list_for_each(&sgwu_self()->gtpu_list, node) {
         sock = ogs_gtp_server(node);
@@ -203,6 +221,4 @@ int sgwu_gtp_open(void)
 void sgwu_gtp_close(void)
 {
     ogs_socknode_remove_all(&sgwu_self()->gtpu_list);
-
-    ogs_pkbuf_pool_destroy(packet_pool);
 }

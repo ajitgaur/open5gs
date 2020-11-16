@@ -38,6 +38,7 @@ void upf_context_init(void)
     ogs_log_install_domain(&__upf_log_domain, "upf", ogs_core()->log.level);
 
     /* Setup UP Function Features */
+    ogs_pfcp_self()->up_function_features.ftup = 1;
     ogs_pfcp_self()->up_function_features.empu = 1;
     ogs_pfcp_self()->up_function_features_len = 2;
 
@@ -136,10 +137,14 @@ int upf_context_parse_config(void)
                     do {
                         int family = AF_UNSPEC;
                         int i, num = 0;
+                        int adv_num = 0;
                         const char *hostname[OGS_MAX_NUM_OF_HOSTNAME];
+                        const char *adv_hostname[OGS_MAX_NUM_OF_HOSTNAME];
                         uint16_t port = self.gtpu_port;
                         const char *dev = NULL;
                         ogs_sockaddr_t *addr = NULL;
+                        ogs_sockaddr_t *adv_addr = NULL;
+                        ogs_sockaddr_t *adv_addr6 = NULL;
                         const char *teid_range_indication = NULL;
                         const char *teid_range = NULL;
                         const char *network_instance = NULL;
@@ -206,6 +211,30 @@ int upf_context_parse_config(void)
                                 } while (
                                     ogs_yaml_iter_type(&hostname_iter) ==
                                         YAML_SEQUENCE_NODE);
+                            } else if (!strcmp(gtpu_key, "advertise_addr") ||
+                                    !strcmp(gtpu_key, "advertise_name")) {
+                                ogs_yaml_iter_t adv_hostname_iter;
+                                ogs_yaml_iter_recurse(
+                                        &gtpu_iter, &adv_hostname_iter);
+                                ogs_assert(ogs_yaml_iter_type(
+                                    &adv_hostname_iter) != YAML_MAPPING_NODE);
+
+                                do {
+                                    if (ogs_yaml_iter_type(
+                                        &adv_hostname_iter) ==
+                                            YAML_SEQUENCE_NODE) {
+                                        if (!ogs_yaml_iter_next(
+                                            &adv_hostname_iter))
+                                            break;
+                                    }
+
+                                    ogs_assert(adv_num <=
+                                            OGS_MAX_NUM_OF_HOSTNAME);
+                                    adv_hostname[adv_num++] =
+                                        ogs_yaml_iter_value(&adv_hostname_iter);
+                                } while (
+                                    ogs_yaml_iter_type(&adv_hostname_iter) ==
+                                        YAML_SEQUENCE_NODE);
                             } else if (!strcmp(gtpu_key, "port")) {
                                 const char *v = ogs_yaml_iter_value(&gtpu_iter);
                                 if (v) port = atoi(v);
@@ -256,6 +285,20 @@ int upf_context_parse_config(void)
                             ogs_assert(rv == OGS_OK);
                         }
 
+                        adv_addr = NULL;
+                        for (i = 0; i < adv_num; i++) {
+                            rv = ogs_addaddrinfo(&adv_addr,
+                                    family, adv_hostname[i], port, 0);
+                            ogs_assert(rv == OGS_OK);
+                        }
+                        rv = ogs_copyaddrinfo(&adv_addr6, adv_addr);
+                        ogs_assert(rv == OGS_OK);
+
+                        rv = ogs_filteraddrinfo(&adv_addr, AF_INET);
+                        ogs_assert(rv == OGS_OK);
+                        rv = ogs_filteraddrinfo(&adv_addr6, AF_INET6);
+                        ogs_assert(rv == OGS_OK);
+
                         /* Find first IPv4/IPv6 address in the list.
                          *
                          * In the following configuration,
@@ -290,8 +333,10 @@ int upf_context_parse_config(void)
 
                             memset(&info, 0, sizeof(info));
                             ogs_pfcp_sockaddr_to_user_plane_ip_resource_info(
-                                    node ? node->addr : NULL,
-                                    node6 ? node6->addr : NULL,
+                                    adv_addr ? adv_addr :
+                                        node ? node->addr : NULL,
+                                    adv_addr6 ? adv_addr6 :
+                                        node6 ? node6->addr : NULL,
                                     &info);
 
                             if (teid_range_indication) {
@@ -318,6 +363,9 @@ int upf_context_parse_config(void)
                             ogs_list_add(&self.gtpu_list, iter);
                         ogs_list_for_each_safe(&list6, next_iter, iter)
                             ogs_list_add(&self.gtpu_list, iter);
+
+                        ogs_freeaddrinfo(adv_addr);
+                        ogs_freeaddrinfo(adv_addr6);
 
                     } while (ogs_yaml_iter_type(&gtpu_array) ==
                             YAML_SEQUENCE_NODE);
@@ -373,8 +421,7 @@ int upf_context_parse_config(void)
 }
 
 upf_sess_t *upf_sess_add(ogs_pfcp_f_seid_t *cp_f_seid,
-        const char *apn, uint8_t pdn_type, ogs_pfcp_ue_ip_addr_t *ue_ip,
-        ogs_pfcp_pdr_id_t default_pdr_id)
+        const char *apn, uint8_t pdn_type, ogs_pfcp_ue_ip_addr_t *ue_ip)
 {
     char buf1[OGS_ADDRSTRLEN];
     char buf2[OGS_ADDRSTRLEN];
@@ -388,11 +435,7 @@ upf_sess_t *upf_sess_add(ogs_pfcp_f_seid_t *cp_f_seid,
     ogs_assert(sess);
     memset(sess, 0, sizeof *sess);
 
-    ogs_pool_init(&sess->pfcp.pdr_pool, OGS_MAX_NUM_OF_PDR);
-    ogs_pool_init(&sess->pfcp.far_pool, OGS_MAX_NUM_OF_FAR);
-    ogs_pool_init(&sess->pfcp.urr_pool, OGS_MAX_NUM_OF_URR);
-    ogs_pool_init(&sess->pfcp.qer_pool, OGS_MAX_NUM_OF_QER);
-    ogs_pool_init(&sess->pfcp.bar_pool, OGS_MAX_NUM_OF_BAR);
+    ogs_pfcp_pool_init(&sess->pfcp);
 
     sess->index = ogs_pool_index(&upf_sess_pool, sess);
     ogs_assert(sess->index > 0 && sess->index <= ogs_app()->pool.sess);
@@ -446,21 +489,16 @@ upf_sess_t *upf_sess_add(ogs_pfcp_f_seid_t *cp_f_seid,
         goto cleanup;
     }
 
-    /* Set Default PDR */
-    OGS_SETUP_DEFAULT_PDR(&sess->pfcp,
-        ogs_pfcp_pdr_find_or_add(&sess->pfcp, default_pdr_id));
-
     ogs_info("UE F-SEID[CP:0x%lx,UP:0x%lx] "
-             "APN[%s] PDN-Type[%d] IPv4[%s] IPv6[%s], Default PDR ID[%d]",
+             "APN[%s] PDN-Type[%d] IPv4[%s] IPv6[%s]",
         (long)sess->upf_n4_seid, (long)sess->smf_n4_seid,
         apn, pdn_type,
         sess->ipv4 ? OGS_INET_NTOP(&sess->ipv4->addr, buf1) : "",
-        sess->ipv6 ? OGS_INET6_NTOP(&sess->ipv6->addr, buf2) : "",
-        sess->pfcp.default_pdr->id);
+        sess->ipv6 ? OGS_INET6_NTOP(&sess->ipv6->addr, buf2) : "");
 
     ogs_list_add(&self.sess_list, sess);
 
-    ogs_info("Added a session. Number of active sessions is now %d",
+    ogs_info("[Added] Number of UPF-Sessions is now %d",
             ogs_list_count(&self.sess_list));
 
     return sess;
@@ -489,15 +527,11 @@ int upf_sess_remove(upf_sess_t *sess)
         ogs_pfcp_ue_ip_free(sess->ipv6);
     }
 
-    ogs_pool_final(&sess->pfcp.pdr_pool);
-    ogs_pool_final(&sess->pfcp.far_pool);
-    ogs_pool_final(&sess->pfcp.urr_pool);
-    ogs_pool_final(&sess->pfcp.qer_pool);
-    ogs_pool_final(&sess->pfcp.bar_pool);
+    ogs_pfcp_pool_final(&sess->pfcp);
 
     ogs_pool_free(&upf_sess_pool, sess);
 
-    ogs_info("Removed a session. Number of active sessions is now %d",
+    ogs_info("[Removed] Number of UPF-sessions is now %d",
             ogs_list_count(&self.sess_list));
 
     return OGS_OK;
@@ -549,7 +583,6 @@ upf_sess_t *upf_sess_add_by_message(ogs_pfcp_message_t *message)
     char apn[OGS_MAX_APN_LEN];
     ogs_pfcp_ue_ip_addr_t *addr = NULL;
     bool default_pdr_found = false;
-    ogs_pfcp_pdr_id_t default_pdr_id;
 
     ogs_pfcp_session_establishment_request_t *req =
         &message->pfcp_session_establishment_request;;
@@ -595,7 +628,6 @@ upf_sess_t *upf_sess_add_by_message(ogs_pfcp_message_t *message)
         if (message->pdi.source_interface.u8 != OGS_PFCP_INTERFACE_CORE)
             continue;
 
-        default_pdr_id = message->pdr_id.u16;
         ogs_fqdn_parse(apn,
             message->pdi.network_instance.data,
             message->pdi.network_instance.len);
@@ -622,8 +654,7 @@ upf_sess_t *upf_sess_add_by_message(ogs_pfcp_message_t *message)
 
     sess = upf_sess_find_by_cp_seid(f_seid->seid);
     if (!sess) {
-        sess = upf_sess_add(
-                f_seid, apn, req->pdn_type.u8, addr, default_pdr_id);
+        sess = upf_sess_add(f_seid, apn, req->pdn_type.u8, addr);
         if (!sess) return NULL;
     }
     ogs_assert(sess);

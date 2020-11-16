@@ -385,7 +385,7 @@ static void test1_func(abts_case *tc, void *data)
 
     /* Send AA-Request */
     rx_sid = NULL;
-    pcscf_rx_send_aar2(&rx_sid, sess,
+    pcscf_rx_send_aar_video(&rx_sid, sess,
             OGS_DIAM_RX_SUBSCRIPTION_ID_TYPE_END_USER_SIP_URI);
 
     /* Receive E-RAB Setup Request +
@@ -494,6 +494,9 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
     /* DELAY is needed before Session-Termination-Request */
     ogs_msleep(100);
 
@@ -524,9 +527,15 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
+    /* DELAY is needed before AA-Request */
+    ogs_msleep(100);
+
     /* Send AA-Request */
     rx_sid = NULL;
-    pcscf_rx_send_aar2(&rx_sid, sess,
+    pcscf_rx_send_aar_video(&rx_sid, sess,
             OGS_DIAM_RX_SUBSCRIPTION_ID_TYPE_END_USER_SIP_URI);
 
     /* Receive E-RAB Setup Request +
@@ -635,6 +644,9 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
     /* DELAY is needed before Session-Termination-Request */
     ogs_msleep(100);
 
@@ -665,9 +677,15 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
+    /* DELAY is needed before AA-Request */
+    ogs_msleep(100);
+
     /* Send AA-Request */
     rx_sid = NULL;
-    pcscf_rx_send_aar2(&rx_sid, sess,
+    pcscf_rx_send_aar_video(&rx_sid, sess,
             OGS_DIAM_RX_SUBSCRIPTION_ID_TYPE_END_USER_SIP_URI);
 
     /* Receive E-RAB Setup Request +
@@ -776,6 +794,9 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
     /* DELAY is needed before Session-Termination-Request */
     ogs_msleep(100);
 
@@ -806,9 +827,15 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
+    /* DELAY is needed before AA-Request */
+    ogs_msleep(100);
+
     /* Send AA-Request */
     rx_sid = NULL;
-    pcscf_rx_send_aar2(&rx_sid, sess,
+    pcscf_rx_send_aar_video(&rx_sid, sess,
             OGS_DIAM_RX_SUBSCRIPTION_ID_TYPE_END_USER_SIP_URI);
 
     /* Receive E-RAB Setup Request +
@@ -917,6 +944,9 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
     /* DELAY is needed before Session-Termination-Request */
     ogs_msleep(100);
 
@@ -947,9 +977,15 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
+    /* DELAY is needed before AA-Request */
+    ogs_msleep(100);
+
     /* Send AA-Request */
     rx_sid = NULL;
-    pcscf_rx_send_aar2(&rx_sid, sess,
+    pcscf_rx_send_aar_video(&rx_sid, sess,
             OGS_DIAM_RX_SUBSCRIPTION_ID_TYPE_END_USER_SIP_URI);
 
     /* Receive E-RAB Setup Request +
@@ -1058,6 +1094,9 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
     /* DELAY is needed before Session-Termination-Request */
     ogs_msleep(100);
 
@@ -1088,9 +1127,15 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
+    /* DELAY is needed before AA-Request */
+    ogs_msleep(100);
+
     /* Send AA-Request */
     rx_sid = NULL;
-    pcscf_rx_send_aar2(&rx_sid, sess,
+    pcscf_rx_send_aar_video(&rx_sid, sess,
             OGS_DIAM_RX_SUBSCRIPTION_ID_TYPE_END_USER_SIP_URI);
 
     /* Receive E-RAB Setup Request +
@@ -1199,6 +1244,9 @@ static void test1_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
+
     /* DELAY is needed before Session-Termination-Request */
     ogs_msleep(100);
 
@@ -1228,6 +1276,9 @@ static void test1_func(abts_case *tc, void *data)
     ABTS_PTR_NOTNULL(tc, sendbuf);
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
+
+    /* Test Bearer Remove */
+    test_bearer_remove(bearer);
 
     ogs_msleep(300);
 

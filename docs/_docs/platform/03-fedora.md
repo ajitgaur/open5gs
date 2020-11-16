@@ -3,8 +3,11 @@ title: Fedora
 head_inline: "<style> .blue { color: blue; } </style>"
 ---
 
-This guide is based on **Fedora 31** Distribution.
+This guide is based on **Fedora 32** Distribution.
 {: .blue}
+
+**Note:** Fedora 33 is not working
+{: .notice--danger}
 
 ### Getting MongoDB
 ---
@@ -91,8 +94,8 @@ $ ninja -C build
 
 Check whether the compilation is correct.
 ```bash
-$ ./build/test/attach/attach ## EPC Only
-$ ./build/test/registration/registration ## 5G Core Only
+$ ./build/tests/attach/attach ## EPC Only
+$ ./build/tests/registration/registration ## 5G Core Only
 ```
 
 Run all test programs as below.

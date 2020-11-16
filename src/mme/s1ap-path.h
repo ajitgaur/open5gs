@@ -36,8 +36,6 @@ void s1ap_close(void);
 
 ogs_sock_t *s1ap_server(ogs_socknode_t *node);
 void s1ap_recv_upcall(short when, ogs_socket_t fd, void *data);
-int s1ap_send(ogs_sock_t *sock,
-        ogs_pkbuf_t *pkbuf, ogs_sockaddr_t *addr, uint16_t stream_no);
 
 int s1ap_send_to_enb(
         mme_enb_t *enb, ogs_pkbuf_t *pkb, uint16_t stream_no);
@@ -46,7 +44,7 @@ int s1ap_delayed_send_to_enb_ue(enb_ue_t *enb_ue,
         ogs_pkbuf_t *pkbuf, ogs_time_t duration);
 int s1ap_send_to_nas(enb_ue_t *enb_ue,
         S1AP_ProcedureCode_t procedureCode, S1AP_NAS_PDU_t *nasPdu);
-int s1ap_send_to_esm(mme_ue_t *mme_ue, ogs_pkbuf_t *esmbuf);
+int s1ap_send_to_esm(mme_ue_t *mme_ue, ogs_pkbuf_t *esmbuf, uint8_t nas_type);
 
 void s1ap_send_s1_setup_response(mme_enb_t *enb);
 void s1ap_send_s1_setup_failure(
@@ -91,6 +89,8 @@ void s1ap_send_error_indication(
         S1AP_MME_UE_S1AP_ID_t *mme_ue_s1ap_id,
         S1AP_ENB_UE_S1AP_ID_t *enb_ue_s1ap_id,
         S1AP_Cause_PR group, long cause);
+void s1ap_send_error_indication2(
+        mme_ue_t *mme_ue, S1AP_Cause_PR group, long cause);
 void s1ap_send_s1_reset_ack(
         mme_enb_t *enb,
         S1AP_UE_associatedLogicalS1_ConnectionListRes_t *partOfS1_Interface);

@@ -45,7 +45,7 @@ int gmm_handle_registration_request(amf_ue_t *amf_ue,
     ogs_nas_5gs_guti_t nas_guti;
 
     ogs_assert(amf_ue);
-    ran_ue = amf_ue->ran_ue;
+    ran_ue = ran_ue_cycle(amf_ue->ran_ue);
     ogs_assert(ran_ue);
 
     ogs_assert(registration_request);
@@ -197,6 +197,7 @@ int gmm_handle_registration_update(amf_ue_t *amf_ue,
 {
     amf_sess_t *sess = NULL;
     uint16_t psimask;
+    int i = 0;
 
     ogs_nas_5gs_tracking_area_identity_t *last_visited_registered_tai = NULL;
     ogs_nas_uplink_data_status_t *uplink_data_status = NULL;
@@ -225,6 +226,25 @@ int gmm_handle_registration_update(amf_ue_t *amf_ue,
 
         amf_ue->num_of_requested_nssai = ogs_nas_parse_nssai(
             amf_ue->requested_nssai, &registration_request->requested_nssai);
+
+        for (i = 0; i < amf_ue->num_of_requested_nssai; i++) {
+            if (amf_find_s_nssai(
+                    &amf_ue->tai.plmn_id, &amf_ue->requested_nssai[i]))
+                break;
+        }
+
+        if (i == amf_ue->num_of_requested_nssai) {
+            ogs_error("CHECK CONFIGURATION: Cannot find Requested NSSAI");
+            for (i = 0; i < amf_ue->num_of_requested_nssai; i++) {
+                ogs_error("    PLMN_ID[MCC:%d MNC:%d]",
+                        ogs_plmn_id_mcc(&amf_ue->tai.plmn_id),
+                        ogs_plmn_id_mnc(&amf_ue->tai.plmn_id));
+                ogs_error("    S_NSSAI[SST:%d SD:0x%x]",
+                        amf_ue->requested_nssai[i].sst,
+                        amf_ue->requested_nssai[i].sd.v);
+            }
+            return OGS_ERROR;
+        }
     }
 
     if (registration_request->presencemask &
@@ -243,7 +263,8 @@ int gmm_handle_registration_update(amf_ue_t *amf_ue,
     }
 
     if ((registration_request->presencemask &
-    OGS_NAS_5GS_REGISTRATION_REQUEST_ALLOWED_PDU_SESSION_STATUS_PRESENT) == 0) {
+        OGS_NAS_5GS_REGISTRATION_REQUEST_ALLOWED_PDU_SESSION_STATUS_PRESENT)
+            == 0) {
         amf_ue->nas.present.allowed_pdu_session_status = 0;
     } else {
         amf_ue->nas.present.allowed_pdu_session_status = 1;
@@ -251,7 +272,7 @@ int gmm_handle_registration_update(amf_ue_t *amf_ue,
     }
 
     if ((registration_request->presencemask &
-            OGS_NAS_5GS_REGISTRATION_REQUEST_UPLINK_DATA_STATUS_PRESENT) == 0) {
+        OGS_NAS_5GS_REGISTRATION_REQUEST_UPLINK_DATA_STATUS_PRESENT) == 0) {
         amf_ue->nas.present.uplink_data_status = 0;
     } else {
         amf_ue->nas.present.uplink_data_status = 1;
@@ -311,7 +332,7 @@ int gmm_handle_service_request(amf_ue_t *amf_ue,
     ogs_nas_key_set_identifier_t *ngksi = NULL;
 
     ogs_assert(amf_ue);
-    ran_ue = amf_ue->ran_ue;
+    ran_ue = ran_ue_cycle(amf_ue->ran_ue);
     ogs_assert(ran_ue);
 
     ngksi = &service_request->ngksi;
@@ -576,7 +597,7 @@ int gmm_handle_identity_response(amf_ue_t *amf_ue,
     ogs_assert(identity_response);
 
     ogs_assert(amf_ue);
-    ran_ue = amf_ue->ran_ue;
+    ran_ue = ran_ue_cycle(amf_ue->ran_ue);
     ogs_assert(ran_ue);
 
     mobile_identity = &identity_response->mobile_identity;
@@ -599,136 +620,6 @@ int gmm_handle_identity_response(amf_ue_t *amf_ue,
 
     return OGS_OK;
 }
-
-#if 0
-int gmm_handle_tau_request(amf_ue_t *amf_ue,
-        ogs_nas_5gs_tracking_area_update_request_t *tau_request)
-{
-    int served_tai_index = 0;
-
-    ogs_nas_5gs_mobile_identity_guti_t *5gs_mobile_identity_guti = NULL;
-    ogs_nas_5gs_guti_t nas_guti;
-
-    ogs_nas_5gs_update_type_t *5gs_update_type =
-                    &tau_request->5gs_update_type;
-    ogs_nas_5gs_mobile_identity_t *5gs_mobile_identity =
-                    &tau_request->old_guti;
-    ran_ue_t *ran_ue = NULL;
-
-    ogs_assert(amf_ue);
-    ran_ue = amf_ue->ran_ue;
-    ogs_assert(ran_ue);
-
-    /* Set 5GS Update Type */
-    memcpy(&amf_ue->nas.update, 5gs_update_type,
-            sizeof(ogs_nas_5gs_update_type_t));
-    amf_ue->nas.message_type = AMF_5GS_TYPE_TAU_REQUEST;
-    amf_ue->nas.ksi = 5gs_update_type->nas_key_set_identifier;
-    ogs_debug("    OGS_NAS_5GS TYPE[%d] KSI[%d] UPDATE[0x%x]",
-            amf_ue->nas.message_type, amf_ue->nas.ksi,
-            amf_ue->nas.data);
-    
-    /*
-     * REGISTRATION_REQUEST
-     * SERVICE_REQUEST
-     *   Clear Timer and Message
-     */
-    CLEAR_AMF_UE_ALL_TIMERS(amf_ue);
-
-    CLEAR_SERVICE_INDICATOR(amf_ue);
-    if (BEARER_CONTEXT_IS_ACTIVE(amf_ue))
-        ogs_debug("    Bearer-Active");
-    else
-        ogs_debug("    Bearer-Inactive");
-
-    if (amf_ue->nas.update.active_flag)
-        ogs_debug("    Active flag");
-    else
-        ogs_debug("    No Active flag");
-
-    ogs_debug("    OLD TAI[PLMN_ID:%06x,TAC:%d]",
-            ogs_plmn_id_hexdump(&amf_ue->tai.plmn_id), amf_ue->tai.tac);
-    ogs_debug("    OLD NR_CGI[PLMN_ID:%06x,CELL_ID:%d]",
-            ogs_plmn_id_hexdump(&amf_ue->e_cgi.plmn_id), amf_ue->e_cgi.cell_id);
-    ogs_debug("    TAI[PLMN_ID:%06x,TAC:%d]",
-            ogs_plmn_id_hexdump(&ran_ue->saved.tai.plmn_id),
-            ran_ue->saved.tai.tac);
-    ogs_debug("    NR_CGI[PLMN_ID:%06x,CELL_ID:%d]",
-            ogs_plmn_id_hexdump(&ran_ue->saved.e_cgi.plmn_id),
-            ran_ue->saved.e_cgi.cell_id);
-
-    /* Copy TAI and ECGI from ran_ue */
-    memcpy(&amf_ue->tai, &ran_ue->saved.tai, sizeof(ogs_5gs_tai_t));
-    memcpy(&amf_ue->e_cgi, &ran_ue->saved.e_cgi, sizeof(ogs_e_cgi_t));
-
-    /* Check TAI */
-    served_tai_index = amf_find_served_tai(&amf_ue->tai);
-    if (served_tai_index < 0) {
-        /* Send TAU reject */
-        ogs_warn("Cannot find Served TAI[PLMN_ID:%06x,TAC:%d]",
-            ogs_plmn_id_hexdump(&amf_ue->tai.plmn_id), amf_ue->tai.tac);
-        nas_5gs_send_tau_reject(amf_ue, EMM_CAUSE_TRACKING_AREA_NOT_ALLOWED);
-        return OGS_ERROR;
-    }
-    ogs_debug("    SERVED_TAI_INDEX[%d]", served_tai_index);
-
-    /* Store UE specific information */
-    if (tau_request->presencemask &
-        OGS_NAS_5GS_TRACKING_AREA_UPDATE_REQUEST_LAST_VISITED_REGISTERED_TAI_PRESENT) {
-        ogs_nas_5gs_tai_t *last_visited_registered_tai = 
-            &tau_request->last_visited_registered_tai;
-
-        ogs_nas_to_plmn_id(&amf_ue->last_visited_plmn_id,
-                &last_visited_registered_tai->nas_plmn_id);
-        ogs_debug("    Visited_PLMN_ID:%06x",
-                ogs_plmn_id_hexdump(&amf_ue->last_visited_plmn_id));
-    } 
-
-    if (tau_request->presencemask &
-            OGS_NAS_5GS_TRACKING_AREA_UPDATE_REQUEST_UE_NETWORK_CAPABILITY_PRESENT) {
-        memcpy(&amf_ue->ue_network_capability, 
-                &tau_request->ue_network_capability,
-                sizeof(tau_request->ue_network_capability));
-    }
-
-    if (tau_request->presencemask &
-            OGS_NAS_5GS_TRACKING_AREA_UPDATE_REQUEST_MS_NETWORK_CAPABILITY_PRESENT) {
-        memcpy(&amf_ue->ms_network_capability, 
-                &tau_request->ms_network_capability,
-                sizeof(tau_request->ms_network_capability));
-    }
-
-    /* TODO: 
-     *   1) Consider if AMF is changed or not.
-     *   2) Consider if SGW is changed or not.
-     */
-    switch (5gs_mobile_identity->imsi.type) {
-    case OGS_NAS_5GS_MOBILE_IDENTITY_GUTI:
-        5gs_mobile_identity_guti = &5gs_mobile_identity->guti;
-
-        nas_guti.nas_plmn_id = 5gs_mobile_identity_guti->nas_plmn_id;
-        nas_guti.amf_gid = 5gs_mobile_identity_guti->amf_gid;
-        nas_guti.amf_code = 5gs_mobile_identity_guti->amf_code;
-        nas_guti.m_tmsi = 5gs_mobile_identity_guti->m_tmsi;
-
-        ogs_debug("    GUTI[G:%d,C:%d,M_TMSI:0x%x] IMSI:[%s]",
-                nas_guti.amf_gid,
-                nas_guti.amf_code,
-                nas_guti.m_tmsi,
-                AMF_UE_HAVE_IMSI(amf_ue) 
-                    ? amf_ue->imsi_bcd : "Unknown");
-        break;
-    default:
-        ogs_warn("Not implemented[%d]", 
-                5gs_mobile_identity->imsi.type);
-        
-        return OGS_OK;
-    }
-
-    return OGS_OK;
-}
-
-#endif
 
 int gmm_handle_security_mode_complete(amf_ue_t *amf_ue,
     ogs_nas_5gs_security_mode_complete_t *security_mode_complete)
@@ -975,6 +866,7 @@ static int gmm_handle_nas_message_container(amf_ue_t *amf_ue,
     }
 
     nasbuf = ogs_pkbuf_alloc(NULL, nas_message_container->length);
+    ogs_assert(nasbuf);
     ogs_pkbuf_put_data(nasbuf,
             nas_message_container->buffer, nas_message_container->length);
 

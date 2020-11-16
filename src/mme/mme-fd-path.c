@@ -227,6 +227,7 @@ static void mme_s6a_aia_cb(void *data, struct msg **msg)
     s6abuf_len = sizeof(ogs_diam_s6a_message_t);
     ogs_assert(s6abuf_len < 8192);
     s6abuf = ogs_pkbuf_alloc(NULL, s6abuf_len);
+    ogs_assert(s6abuf);
     ogs_pkbuf_put(s6abuf, s6abuf_len);
     s6a_message = (ogs_diam_s6a_message_t *)s6abuf->data;
     ogs_assert(s6a_message);
@@ -252,7 +253,8 @@ static void mme_s6a_aia_cb(void *data, struct msg **msg)
         ret = fd_msg_search_avp(*msg, ogs_diam_experimental_result, &avp);
         ogs_assert(ret == 0);
         if (avp) {
-            ret = fd_avp_search_avp(avp, ogs_diam_experimental_result_code, &avpch);
+            ret = fd_avp_search_avp(
+                    avp, ogs_diam_experimental_result_code, &avpch);
             ogs_assert(ret == 0);
             if (avpch) {
                 ret = fd_msg_avp_hdr(avpch, &hdr);
@@ -295,7 +297,16 @@ static void mme_s6a_aia_cb(void *data, struct msg **msg)
     }
 
     if (s6a_message->result_code != ER_DIAMETER_SUCCESS) {
-        ogs_warn("ERROR DIAMETER Result Code(%d)", s6a_message->result_code);
+        if (s6a_message->err)
+            ogs_info("    Result Code: %d", s6a_message->result_code);
+        else if (s6a_message->exp_err)
+            ogs_info("    Experimental Result Code: %d",
+                    s6a_message->result_code);
+        else {
+            ogs_fatal("ERROR DIAMETER Result Code(%d)",
+                    s6a_message->result_code);
+            ogs_assert_if_reached();
+        }
         goto out;
     }
 
@@ -309,7 +320,8 @@ static void mme_s6a_aia_cb(void *data, struct msg **msg)
         error++;
     }
 
-    ret = fd_avp_search_avp(avp, ogs_diam_s6a_e_utran_vector, &avp_e_utran_vector); 
+    ret = fd_avp_search_avp(
+            avp, ogs_diam_s6a_e_utran_vector, &avp_e_utran_vector);
     ogs_assert(ret == 0);
     if (avp) {
         ret = fd_msg_avp_hdr(avp_e_utran_vector, &hdr);
@@ -629,6 +641,7 @@ static void mme_s6a_ula_cb(void *data, struct msg **msg)
     s6abuf_len = sizeof(ogs_diam_s6a_message_t);
     ogs_assert(s6abuf_len < 8192);
     s6abuf = ogs_pkbuf_alloc(NULL, s6abuf_len);
+    ogs_assert(s6abuf);
     ogs_pkbuf_put(s6abuf, s6abuf_len);
     s6a_message = (ogs_diam_s6a_message_t *)s6abuf->data;
     ogs_assert(s6a_message);
@@ -1128,10 +1141,30 @@ static void mme_s6a_ula_cb(void *data, struct msg **msg)
 int mme_fd_init(void)
 {
     int ret;
+    struct dict_object *s6a_app, *vnd;
+    struct dict_vendor_data vnd_data;
+    struct dict_application_data s6a_app_data;
 
     ret = ogs_diam_init(FD_MODE_CLIENT,
                 mme_self()->diam_conf_path, mme_self()->diam_config);
     ogs_assert(ret == OGS_OK);
+
+    vnd_data.vendor_id = 10415;
+    vnd_data.vendor_name = (char *) "3GPP";
+
+    ret = fd_dict_new(fd_g_config->cnf_dict,
+            DICT_VENDOR, &vnd_data, NULL, &vnd);
+    ogs_assert(ret == 0);
+
+    s6a_app_data.application_id = 16777251;
+    s6a_app_data.application_name = (char *) "S6A";
+
+    ret = fd_dict_new(fd_g_config->cnf_dict, DICT_APPLICATION,
+            &s6a_app_data, NULL, &s6a_app);
+    ogs_assert(ret == 0);
+
+    ret = fd_disp_app_support(s6a_app, vnd, 1, 0);
+    ogs_assert(ret == 0);
 
 	/* Install objects definitions for this application */
 	ret = ogs_diam_s6a_init();

@@ -29,18 +29,49 @@ logger:
 #  o GTP-U Server(all address available)
 #    gtpu:
 #
-#  o Provide custom SGW GTP-U address to be advertised inside S1AP messages
+#  o GTP-U Server(127.0.0.6:2152, [::1]:2152)
 #    gtpu:
-#      addr: 10.4.128.21
-#      advertise_addr: 172.24.15.30
+#      - addr:
+#        - 127.0.0.6
+#        - ::1
+#
+#  o GTP-U Server(127.0.0.1:2152, [::1]:2152)
+#    gtpu:
+#      - name: localhost
+#
+#  o User Plane IP Resource information
+#    gtpu:
+#      - addr:
+#        - 127.0.0.6
+#        - ::1
+#        teid_range_indication: 4
+#        teid_range: 10
+#        network_instance: internet
+#        source_interface: 0
+#      - addr: 127.0.10.4
+#        teid_range_indication: 4
+#        teid_range: 5
+#        network_instance: ims
+#        source_interface: 1
+#
+#  o Provide custom SGW-U GTP-U address to be advertised inside S1AP messages
+#    gtpu:
+#      - addr: 10.4.128.21
+#        advertise_addr: 172.24.15.30
 #
 #    gtpu:
-#      addr: 10.4.128.21
-#      advertise_name: sgw1.epc.mnc001.mcc001.3gppnetwork.org
+#      - addr: 10.4.128.21
+#        advertise_addr:
+#        - 127.0.0.1
+#        - ::1
 #
 #    gtpu:
-#      dev: ens3
-#      advertise_name: sgw1.epc.mnc001.mcc001.3gppnetwork.org
+#      - addr: 10.4.128.21
+#        advertise_name: sgw1.epc.mnc001.mcc001.3gppnetwork.org
+#
+#    gtpu:
+#      - dev: ens3
+#        advertise_name: sgw1.epc.mnc001.mcc001.3gppnetwork.org
 #
 #  <PFCP Server>
 #
@@ -51,9 +82,9 @@ logger:
 #
 sgwu:
     gtpu:
-      addr: 127.0.0.6
+      - addr: 127.0.0.6
     pfcp:
-      addr: 127.0.0.6
+      - addr: 127.0.0.6
 
 #
 # sgwc:
@@ -94,7 +125,7 @@ parameter:
 # max:
 #
 # o Maximum Number of UE per AMF/MME
-#    ue: 4,096
+#    ue: 1024
 # o Maximum Number of gNB/eNB per AMF/MME
 #    gnb: 32
 #
@@ -105,7 +136,7 @@ max:
 #
 # o The Number of Default Memory Pool Size
 #
-#   - Pool-size 128         => 8192 Number
+#   - Pool-size 128         => 32768 Number
 #   - Pool-size 256         => 4096 Number
 #   - Pool-size 512         => 2048 Number
 #   - Pool-size 1024        => 1024 Number
@@ -113,7 +144,7 @@ max:
 #   - Pool-size 8192        => 128 Number
 #   - Pool-size 1024*1024   => 8 Number
 #
-#    128:  8192
+#    128:  32768
 #    256:  4096
 #    512:  2048
 #    1024: 1024
@@ -121,10 +152,14 @@ max:
 #    8192: 128
 #    big:  8
 #
-# o Memory of Packet Buffering in UPF/SGW
-#   - Maximum Number of packet(SDU size = 8Kbytes) pool in UPF/SGW
-#   - UPF/SGW Memory Usage : 65536 * 8Kbytes = 512Mbytes
-#
-#   packet: 65536
-#
 pool:
+
+#
+# time:
+#
+#  o Message Wait Duration (Default : 10,000 ms = 10 seconds)
+#
+#  o Message Wait Duration (3000 ms)
+#    message:
+#        duration: 3000
+time:

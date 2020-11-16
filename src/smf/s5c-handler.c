@@ -68,14 +68,9 @@ void smf_s5c_handle_create_session_request(
     ogs_assert(xact);
     ogs_assert(req);
 
-    ogs_debug("[SMF] Create Session Reqeust");
+    ogs_debug("Create Session Reqeust");
 
     cause_value = OGS_GTP_CAUSE_REQUEST_ACCEPTED;
-
-    if (!sess) {
-        ogs_error("No Context");
-        cause_value = OGS_GTP_CAUSE_CONTEXT_NOT_FOUND;
-    }
 
     if (req->imsi.presence == 0) {
         ogs_error("No IMSI");
@@ -114,8 +109,13 @@ void smf_s5c_handle_create_session_request(
         cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
     }
 
+    if (!sess) {
+        ogs_error("No Context");
+        cause_value = OGS_GTP_CAUSE_CONTEXT_NOT_FOUND;
+    }
+
     if (!ogs_diam_peer_connected()) {
-        ogs_error("No Diameter Peer");
+        ogs_warn("No Diameter Peer");
         cause_value = OGS_GTP_CAUSE_REMOTE_PEER_NOT_RESPONDING;
     }
 
@@ -186,6 +186,7 @@ void smf_s5c_handle_create_session_request(
     ogs_debug("    SGW_S5U_TEID[0x%x] PGW_S5U_TEID[0x%x]",
             bearer->sgw_s5u_teid, bearer->pgw_s5u_teid);
 
+    /* Set Bearer QoS */
     decoded = ogs_gtp_parse_bearer_qos(&bearer_qos,
         &req->bearer_contexts_to_be_created.bearer_level_qos);
     ogs_assert(req->bearer_contexts_to_be_created.bearer_level_qos.len ==
@@ -238,7 +239,7 @@ void smf_s5c_handle_delete_session_request(
 {
     uint8_t cause_value = 0;
 
-    ogs_debug("[SMF] Delete Session Request");
+    ogs_debug("Delete Session Request");
 
     ogs_assert(xact);
     ogs_assert(req);
@@ -273,6 +274,7 @@ void smf_s5c_handle_create_bearer_response(
         ogs_gtp_create_bearer_response_t *rsp)
 {
     int rv;
+    uint8_t cause_value;
     ogs_gtp_f_teid_t *sgw_s5u_teid, *pgw_s5u_teid;
     smf_bearer_t *bearer = NULL;
     ogs_pfcp_far_t *dl_far = NULL;
@@ -280,53 +282,78 @@ void smf_s5c_handle_create_bearer_response(
     ogs_assert(xact);
     ogs_assert(rsp);
 
-    ogs_debug("[SMF] Create Bearer Response");
+    ogs_debug("Create Bearer Response");
+
+    cause_value = OGS_GTP_CAUSE_REQUEST_ACCEPTED;
 
     rv = ogs_gtp_xact_commit(xact);
     ogs_expect(rv == OGS_OK);
 
-    if (!sess) {
-        ogs_warn("No Context in TEID");
-        return;
+    if (rsp->bearer_contexts.presence == 0) {
+        ogs_error("No Bearer");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
+    }
+    if (rsp->bearer_contexts.eps_bearer_id.presence == 0) {
+        ogs_error("No EPS Bearer ID");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
+    }
+    if (rsp->bearer_contexts.s5_s8_u_pgw_f_teid.presence == 0) {
+        ogs_error("No SMF TEID");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
+    }
+    if (rsp->bearer_contexts.s5_s8_u_sgw_f_teid.presence == 0) {
+        ogs_error("No SGW TEID");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
     }
 
-    ogs_debug("    SGW_S5C_TEID[0x%x] SMF_N4_TEID[0x%x]",
-            sess->sgw_s5c_teid, sess->smf_n4_teid);
+    bearer = xact->data;
+    ogs_assert(bearer);
+
+    if (!sess) {
+        ogs_warn("No Context in TEID");
+
+        sess = bearer->sess;
+        ogs_assert(sess);
+
+        cause_value = OGS_GTP_CAUSE_CONTEXT_NOT_FOUND;
+    }
 
     if (rsp->cause.presence) {
         ogs_gtp_cause_t *cause = rsp->cause.data;
         ogs_assert(cause);
 
-        if (cause->value != OGS_GTP_CAUSE_REQUEST_ACCEPTED) {
-            ogs_warn("GTP Failed [CAUSE:%d]", cause->value);
-            return;
+        cause_value = cause->value;
+        if (cause_value == OGS_GTP_CAUSE_REQUEST_ACCEPTED) {
+            if (rsp->bearer_contexts.cause.presence) {
+                cause = rsp->bearer_contexts.cause.data;
+                ogs_assert(cause);
+
+                cause_value = cause->value;
+            } else {
+                ogs_error("No Cause");
+                cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
+            }
+        } else {
+            ogs_warn("GTP Failed [CAUSE:%d]", cause_value);
         }
+    } else {
+        ogs_error("No Cause");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
     }
 
-    if (rsp->bearer_contexts.presence == 0) {
-        ogs_error("No Bearer");
-        return;
-    }
-    if (rsp->bearer_contexts.eps_bearer_id.presence == 0) {
-        ogs_error("No EPS Bearer ID");
-        return;
-    }
-    if (rsp->bearer_contexts.s5_s8_u_pgw_f_teid.presence == 0) {
-        ogs_error("No SMF TEID");
-        return;
-    }
-    if (rsp->bearer_contexts.s5_s8_u_sgw_f_teid.presence == 0) {
-        ogs_error("No SGW TEID");
+    if (cause_value != OGS_GTP_CAUSE_REQUEST_ACCEPTED) {
+        smf_epc_pfcp_send_bearer_modification_request(
+                bearer, OGS_PFCP_MODIFY_REMOVE);
         return;
     }
 
     /* Correlate with PGW-S5U-TEID */
     pgw_s5u_teid = rsp->bearer_contexts.s5_s8_u_pgw_f_teid.data;
-    ogs_assert(pgw_s5u_teid);
+    ogs_expect_or_return(pgw_s5u_teid);
 
     /* Find the Bearer by PGW-S5U-TEID */
-    bearer = smf_bearer_find_by_pgw_s5u_teid(be32toh(pgw_s5u_teid->teid));
-    ogs_assert(bearer);
+    bearer = smf_bearer_find_by_pgw_s5u_teid(sess, be32toh(pgw_s5u_teid->teid));
+    ogs_expect_or_return(bearer);
 
     /* Set EBI */
     bearer->ebi = rsp->bearer_contexts.eps_bearer_id.u8;
@@ -338,7 +365,7 @@ void smf_s5c_handle_create_bearer_response(
     rv = ogs_gtp_f_teid_to_ip(sgw_s5u_teid, &bearer->sgw_s5u_ip);
     ogs_assert(rv == OGS_OK);
 
-    ogs_debug("[SMF] Create Bearer Response : SGW[0x%x] --> SMF[0x%x]",
+    ogs_debug("Create Bearer Response : SGW[0x%x] --> SMF[0x%x]",
             sess->sgw_s5c_teid, sess->smf_n4_teid);
 
     /* Setup FAR */
@@ -349,31 +376,8 @@ void smf_s5c_handle_create_bearer_response(
         &dl_far->outer_header_creation, &dl_far->outer_header_creation_len);
     dl_far->outer_header_creation.teid = bearer->sgw_s5u_teid;
 
-    /* Setup QER */
-    if (bearer->qos.mbr.downlink || bearer->qos.mbr.uplink ||
-        bearer->qos.gbr.downlink || bearer->qos.gbr.uplink) {
-        ogs_pfcp_qer_t *qer = NULL;
-
-        /* Only 1 QER is used per bearer */
-        qer = bearer->qer;
-        if (!qer) {
-            qer = ogs_pfcp_qer_add(&sess->pfcp);
-            ogs_assert(qer);
-            qer->id = qer->index;
-            bearer->qer = qer;
-        }
-
-        ogs_pfcp_pdr_associate_qer(bearer->dl_pdr, qer);
-        ogs_pfcp_pdr_associate_qer(bearer->ul_pdr, qer);
-
-        qer->mbr.uplink = bearer->qos.mbr.uplink;
-        qer->mbr.downlink = bearer->qos.mbr.downlink;
-        qer->gbr.uplink = bearer->qos.gbr.uplink;
-        qer->gbr.downlink = bearer->qos.gbr.downlink;
-    }
-
     smf_epc_pfcp_send_bearer_modification_request(
-            bearer, OGS_PFCP_MODIFY_CREATE);
+            bearer, OGS_PFCP_MODIFY_ACTIVATE);
 }
 
 void smf_s5c_handle_update_bearer_response(
@@ -381,6 +385,7 @@ void smf_s5c_handle_update_bearer_response(
         ogs_gtp_update_bearer_response_t *rsp)
 {
     int rv;
+    uint8_t cause_value;
     uint64_t gtp_flags = 0;
     uint64_t pfcp_flags = 0;
     smf_bearer_t *bearer = NULL;
@@ -390,43 +395,65 @@ void smf_s5c_handle_update_bearer_response(
     gtp_flags = xact->update_flags;
     ogs_assert(gtp_flags);
 
-    ogs_debug("[SMF] Update Bearer Response");
+    ogs_debug("Update Bearer Response");
+
+    cause_value = OGS_GTP_CAUSE_REQUEST_ACCEPTED;
 
     rv = ogs_gtp_xact_commit(xact);
     ogs_expect(rv == OGS_OK);
 
-    if (!sess) {
-        ogs_warn("No Context in TEID");
-        return;
+    if (rsp->bearer_contexts.presence == 0) {
+        ogs_error("No Bearer");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
+    }
+    if (rsp->bearer_contexts.eps_bearer_id.presence == 0) {
+        ogs_error("No EPS Bearer ID");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
     }
 
-    ogs_debug("    SGW_S5C_TEID[0x%x] SMF_N4_TEID[0x%x]",
-            sess->sgw_s5c_teid, sess->smf_n4_teid);
+    bearer = xact->data;
+    ogs_assert(bearer);
+
+    if (!sess) {
+        ogs_warn("No Context in TEID");
+
+        sess = bearer->sess;
+        ogs_assert(sess);
+
+        cause_value = OGS_GTP_CAUSE_CONTEXT_NOT_FOUND;
+    }
 
     if (rsp->cause.presence) {
         ogs_gtp_cause_t *cause = rsp->cause.data;
         ogs_assert(cause);
 
-        if (cause->value != OGS_GTP_CAUSE_REQUEST_ACCEPTED) {
-            ogs_warn("GTP Failed [CAUSE:%d]", cause->value);
-            return;
+        cause_value = cause->value;
+        if (cause_value == OGS_GTP_CAUSE_REQUEST_ACCEPTED) {
+            if (rsp->bearer_contexts.cause.presence) {
+                cause = rsp->bearer_contexts.cause.data;
+                ogs_assert(cause);
+
+                cause_value = cause->value;
+            } else {
+                ogs_error("No Cause");
+                cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
+            }
+        } else {
+            ogs_warn("GTP Failed [CAUSE:%d]", cause_value);
         }
+    } else {
+        ogs_error("No Cause");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
     }
 
-    if (rsp->bearer_contexts.presence == 0) {
-        ogs_error("No Bearer");
+    ogs_debug("    SGW_S5C_TEID[0x%x] SMF_N4_TEID[0x%x]",
+            sess->sgw_s5c_teid, sess->smf_n4_teid);
+
+    if (cause_value != OGS_GTP_CAUSE_REQUEST_ACCEPTED) {
         return;
     }
-    if (rsp->bearer_contexts.eps_bearer_id.presence == 0) {
-        ogs_error("No EPS Bearer ID");
-        return;
-    }
 
-    bearer = smf_bearer_find_by_ebi(
-            sess, rsp->bearer_contexts.eps_bearer_id.u8);
-    ogs_assert(bearer);
-
-    ogs_debug("[SMF] Update Bearer Response : SGW[0x%x] --> SMF[0x%x]",
+    ogs_debug("Update Bearer Response : SGW[0x%x] --> SMF[0x%x]",
             sess->sgw_s5c_teid, sess->smf_n4_teid);
 
     if (gtp_flags & OGS_GTP_MODIFY_TFT_UPDATE) {
@@ -483,48 +510,67 @@ void smf_s5c_handle_delete_bearer_response(
         ogs_gtp_delete_bearer_response_t *rsp)
 {
     int rv;
+    uint8_t cause_value;
     smf_bearer_t *bearer = NULL;
 
     ogs_assert(xact);
     ogs_assert(rsp);
 
-    ogs_debug("[SMF] Delete Bearer Response");
+    ogs_debug("Delete Bearer Response");
+
+    cause_value = OGS_GTP_CAUSE_REQUEST_ACCEPTED;
 
     rv = ogs_gtp_xact_commit(xact);
     ogs_expect(rv == OGS_OK);
 
-    if (!sess) {
-        ogs_warn("No Context in TEID");
-        return;
+    if (rsp->bearer_contexts.presence == 0) {
+        ogs_error("No Bearer");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
+    }
+    if (rsp->bearer_contexts.eps_bearer_id.presence == 0) {
+        ogs_error("No EPS Bearer ID");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
     }
 
-    ogs_debug("    SGW_S5C_TEID[0x%x] SMF_N4_TEID[0x%x]",
-            sess->sgw_s5c_teid, sess->smf_n4_teid);
+    bearer = xact->data;
+    ogs_assert(bearer);
+
+    if (!sess) {
+        ogs_warn("No Context in TEID");
+
+        sess = bearer->sess;
+        ogs_assert(sess);
+
+        cause_value = OGS_GTP_CAUSE_CONTEXT_NOT_FOUND;
+    }
 
     if (rsp->cause.presence) {
         ogs_gtp_cause_t *cause = rsp->cause.data;
         ogs_assert(cause);
 
-        if (cause->value != OGS_GTP_CAUSE_REQUEST_ACCEPTED) {
-            ogs_warn("GTP Failed [CAUSE:%d]", cause->value);
-            return;
+        cause_value = cause->value;
+        if (cause_value == OGS_GTP_CAUSE_REQUEST_ACCEPTED) {
+            if (rsp->bearer_contexts.cause.presence) {
+                cause = rsp->bearer_contexts.cause.data;
+                ogs_assert(cause);
+
+                cause_value = cause->value;
+            } else {
+                ogs_error("No Cause");
+                cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
+            }
+        } else {
+            ogs_warn("GTP Failed [CAUSE:%d]", cause_value);
         }
+    } else {
+        ogs_error("No Cause");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
     }
 
-    if (rsp->bearer_contexts.presence == 0) {
-        ogs_error("No Bearer");
-        return;
-    }
-    if (rsp->bearer_contexts.eps_bearer_id.presence == 0) {
-        ogs_error("No EPS Bearer ID");
-        return;
-    }
+    ogs_debug("    SGW_S5C_TEID[0x%x] SMF_N4_TEID[0x%x]",
+            sess->sgw_s5c_teid, sess->smf_n4_teid);
 
-    bearer = smf_bearer_find_by_ebi(
-            sess, rsp->bearer_contexts.eps_bearer_id.u8);
-    ogs_assert(bearer);
-
-    ogs_debug("[SMF] Delete Bearer Response : SGW[0x%x] --> SMF[0x%x]",
+    ogs_debug("Delete Bearer Response : SGW[0x%x] --> SMF[0x%x]",
             sess->sgw_s5c_teid, sess->smf_n4_teid);
 
     smf_epc_pfcp_send_bearer_modification_request(
@@ -535,71 +581,75 @@ static int reconfigure_packet_filter(smf_pf_t *pf, ogs_gtp_tft_t *tft, int i)
 {
     int j;
 
+    ogs_assert(pf);
+    ogs_assert(tft);
+
     memset(&pf->ipfw_rule, 0, sizeof(ogs_ipfw_rule_t));
+    pf->direction = tft->pf[i].direction;
     for (j = 0; j < tft->pf[i].num_of_component; j++) {
         switch(tft->pf[i].component[j].type) {
         case GTP_PACKET_FILTER_PROTOCOL_IDENTIFIER_NEXT_HEADER_TYPE:
             pf->ipfw_rule.proto = tft->pf[i].component[j].proto;
             break;
         case GTP_PACKET_FILTER_IPV4_REMOTE_ADDRESS_TYPE:
-            pf->ipfw_rule.ipv4_remote = 1;
-            pf->ipfw_rule.ip.remote.addr[0] = tft->pf[i].component[j].ipv4.addr;
-            pf->ipfw_rule.ip.remote.mask[0] = tft->pf[i].component[j].ipv4.mask;
+            pf->ipfw_rule.ipv4_dst = 1;
+            pf->ipfw_rule.ip.dst.addr[0] = tft->pf[i].component[j].ipv4.addr;
+            pf->ipfw_rule.ip.dst.mask[0] = tft->pf[i].component[j].ipv4.mask;
             break;
         case GTP_PACKET_FILTER_IPV4_LOCAL_ADDRESS_TYPE:
-            pf->ipfw_rule.ipv4_local = 1;
-            pf->ipfw_rule.ip.local.addr[0] = tft->pf[i].component[j].ipv4.addr;
-            pf->ipfw_rule.ip.local.mask[0] = tft->pf[i].component[j].ipv4.mask;
+            pf->ipfw_rule.ipv4_src = 1;
+            pf->ipfw_rule.ip.src.addr[0] = tft->pf[i].component[j].ipv4.addr;
+            pf->ipfw_rule.ip.src.mask[0] = tft->pf[i].component[j].ipv4.mask;
             break;
         case GTP_PACKET_FILTER_IPV6_REMOTE_ADDRESS_TYPE:
-            pf->ipfw_rule.ipv6_remote = 1;
-            memcpy(pf->ipfw_rule.ip.remote.addr,
+            pf->ipfw_rule.ipv6_dst = 1;
+            memcpy(pf->ipfw_rule.ip.dst.addr,
                 tft->pf[i].component[j].ipv6_mask.addr,
-                sizeof(pf->ipfw_rule.ip.remote.addr));
-            memcpy(pf->ipfw_rule.ip.remote.mask,
+                sizeof(pf->ipfw_rule.ip.dst.addr));
+            memcpy(pf->ipfw_rule.ip.dst.mask,
                 tft->pf[i].component[j].ipv6_mask.mask,
-                sizeof(pf->ipfw_rule.ip.remote.mask));
+                sizeof(pf->ipfw_rule.ip.dst.mask));
             break;
         case GTP_PACKET_FILTER_IPV6_REMOTE_ADDRESS_PREFIX_LENGTH_TYPE:
-            pf->ipfw_rule.ipv6_remote = 1;
-            memcpy(pf->ipfw_rule.ip.remote.addr,
+            pf->ipfw_rule.ipv6_dst = 1;
+            memcpy(pf->ipfw_rule.ip.dst.addr,
                 tft->pf[i].component[j].ipv6_mask.addr,
-                sizeof(pf->ipfw_rule.ip.remote.addr));
-            n2mask((struct in6_addr *)pf->ipfw_rule.ip.remote.mask,
+                sizeof(pf->ipfw_rule.ip.dst.addr));
+            n2mask((struct in6_addr *)pf->ipfw_rule.ip.dst.mask,
                 tft->pf[i].component[j].ipv6.prefixlen);
             break;
         case GTP_PACKET_FILTER_IPV6_LOCAL_ADDRESS_TYPE:
-            pf->ipfw_rule.ipv6_local = 1;
-            memcpy(pf->ipfw_rule.ip.local.addr,
+            pf->ipfw_rule.ipv6_src = 1;
+            memcpy(pf->ipfw_rule.ip.src.addr,
                 tft->pf[i].component[j].ipv6_mask.addr,
-                sizeof(pf->ipfw_rule.ip.local.addr));
-            memcpy(pf->ipfw_rule.ip.local.mask,
+                sizeof(pf->ipfw_rule.ip.src.addr));
+            memcpy(pf->ipfw_rule.ip.src.mask,
                 tft->pf[i].component[j].ipv6_mask.mask,
-                sizeof(pf->ipfw_rule.ip.local.mask));
+                sizeof(pf->ipfw_rule.ip.src.mask));
             break;
         case GTP_PACKET_FILTER_IPV6_LOCAL_ADDRESS_PREFIX_LENGTH_TYPE:
-            pf->ipfw_rule.ipv6_local = 1;
-            memcpy(pf->ipfw_rule.ip.local.addr,
+            pf->ipfw_rule.ipv6_src = 1;
+            memcpy(pf->ipfw_rule.ip.src.addr,
                 tft->pf[i].component[j].ipv6_mask.addr,
-                sizeof(pf->ipfw_rule.ip.local.addr));
-            n2mask((struct in6_addr *)pf->ipfw_rule.ip.local.mask,
+                sizeof(pf->ipfw_rule.ip.src.addr));
+            n2mask((struct in6_addr *)pf->ipfw_rule.ip.src.mask,
                 tft->pf[i].component[j].ipv6.prefixlen);
             break;
         case GTP_PACKET_FILTER_SINGLE_LOCAL_PORT_TYPE:
-            pf->ipfw_rule.port.local.low = pf->ipfw_rule.port.local.high =
+            pf->ipfw_rule.port.src.low = pf->ipfw_rule.port.src.high =
                     tft->pf[i].component[j].port.low;
             break;
         case GTP_PACKET_FILTER_SINGLE_REMOTE_PORT_TYPE:
-            pf->ipfw_rule.port.remote.low = pf->ipfw_rule.port.remote.high =
+            pf->ipfw_rule.port.dst.low = pf->ipfw_rule.port.dst.high =
                     tft->pf[i].component[j].port.low;
             break;
         case GTP_PACKET_FILTER_LOCAL_PORT_RANGE_TYPE:
-            pf->ipfw_rule.port.local.low = tft->pf[i].component[j].port.low;
-            pf->ipfw_rule.port.local.high = tft->pf[i].component[j].port.high;
+            pf->ipfw_rule.port.src.low = tft->pf[i].component[j].port.low;
+            pf->ipfw_rule.port.src.high = tft->pf[i].component[j].port.high;
             break;
         case GTP_PACKET_FILTER_REMOTE_PORT_RANGE_TYPE:
-            pf->ipfw_rule.port.remote.low = tft->pf[i].component[j].port.low;
-            pf->ipfw_rule.port.remote.high = tft->pf[i].component[j].port.high;
+            pf->ipfw_rule.port.dst.low = tft->pf[i].component[j].port.low;
+            pf->ipfw_rule.port.dst.high = tft->pf[i].component[j].port.high;
             break;
         default:
             ogs_error("Unknown Packet Filter Type(%d)",
@@ -642,19 +692,6 @@ void smf_s5c_handle_bearer_resource_command(
 
     cause_value = OGS_GTP_CAUSE_REQUEST_ACCEPTED;
 
-    if (cmd->linked_eps_bearer_id.presence == 0) {
-        ogs_error("No Linked EPS Bearer ID");
-        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
-    } else {
-        bearer = smf_bearer_find_by_ebi(
-                sess, cmd->linked_eps_bearer_id.u8);
-        if (!bearer) {
-            ogs_error("No Context for Linked EPS Bearer ID[%d]",
-                    cmd->linked_eps_bearer_id.u8);
-            cause_value = OGS_GTP_CAUSE_CONTEXT_NOT_FOUND;
-        }
-    }
-
     if (cmd->procedure_transaction_id.presence == 0) {
         ogs_error("No PTI");
         cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
@@ -662,6 +699,28 @@ void smf_s5c_handle_bearer_resource_command(
     if (cmd->traffic_aggregate_description.presence == 0) {
         ogs_error("No Traffic aggregate description(TAD)");
         cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
+    }
+
+    if (cmd->linked_eps_bearer_id.presence == 0) {
+        ogs_error("No Linked EPS Bearer ID");
+        cause_value = OGS_GTP_CAUSE_MANDATORY_IE_MISSING;
+    }
+
+    if (!sess) {
+        ogs_warn("No Context");
+        cause_value = OGS_GTP_CAUSE_CONTEXT_NOT_FOUND;
+    }
+
+    if (cause_value == OGS_GTP_CAUSE_REQUEST_ACCEPTED) {
+        bearer = smf_bearer_find_by_ebi(sess, cmd->linked_eps_bearer_id.u8);
+        if (!bearer)
+            ogs_error("No Context for Linked EPS Bearer ID[%d]",
+                    cmd->linked_eps_bearer_id.u8);
+    }
+
+    if (!bearer) {
+        ogs_error("No Context");
+        cause_value = OGS_GTP_CAUSE_CONTEXT_NOT_FOUND;
     }
 
     if (cause_value != OGS_GTP_CAUSE_REQUEST_ACCEPTED) {
@@ -692,12 +751,49 @@ void smf_s5c_handle_bearer_resource_command(
                         OGS_GTP_CAUSE_SEMANTIC_ERROR_IN_THE_TAD_OPERATION);
                     return;
                 }
+/*
+ * Refer to lib/ipfw/ogs-ipfw.h
+ * Issue #338
+ *
+ * <DOWNLINK>
+ * TFT : Local <UE_IP> <UE_PORT> REMOTE <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT>
+ * -->
+ * RULE : Source <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> Destination <UE_IP> <UE_PORT>
+ *
+ * <UPLINK>
+ * TFT : Local <UE_IP> <UE_PORT> REMOTE <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT>
+ * -->
+ * RULE : Source <UE_IP> <UE_PORT> Destination <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT>
+ */
+                if (pf->direction == OGS_FLOW_DOWNLINK_ONLY)
+                    ogs_ipfw_rule_swap(&pf->ipfw_rule);
 
                 if (pf->flow_description)
                     ogs_free(pf->flow_description);
-                pf->flow_description =
-                    ogs_ipfw_encode_flow_description(&pf->ipfw_rule);
-                pf->direction = tft.pf[i].direction;
+/*
+ * Issue #338
+ *
+ * <DOWNLINK>
+ * RULE : Source <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> Destination <UE_IP> <UE_PORT>
+ * -->
+ * GX : permit out from <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> to <UE_IP> <UE_PORT>
+ * PFCP : permit out from <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> to <UE_IP> <UE_PORT>
+ *
+ * <UPLINK>
+ * RULE : Source <UE_IP> <UE_PORT> Destination <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT>
+ * -->
+ * GX : permit out from <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> to <UE_IP> <UE_PORT>
+ * PFCP : permit out from <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> to <UE_IP> <UE_PORT>
+ */
+                if (pf->direction == OGS_FLOW_UPLINK_ONLY) {
+                    ogs_ipfw_rule_t tmp;
+                    ogs_ipfw_copy_and_swap(&tmp, &pf->ipfw_rule);
+                    pf->flow_description =
+                        ogs_ipfw_encode_flow_description(&tmp);
+                } else {
+                    pf->flow_description =
+                        ogs_ipfw_encode_flow_description(&pf->ipfw_rule);
+                }
             }
 
             tft_update = 1;
@@ -721,12 +817,50 @@ void smf_s5c_handle_bearer_resource_command(
                     OGS_GTP_CAUSE_SEMANTIC_ERROR_IN_THE_TAD_OPERATION);
                 return;
             }
+/*
+ * Refer to lib/ipfw/ogs-ipfw.h
+ * Issue #338
+ *
+ * <DOWNLINK>
+ * TFT : Local <UE_IP> <UE_PORT> REMOTE <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT>
+ * -->
+ * RULE : Source <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> Destination <UE_IP> <UE_PORT>
+ *
+ * <UPLINK>
+ * TFT : Local <UE_IP> <UE_PORT> REMOTE <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT>
+ * -->
+ * RULE : Source <UE_IP> <UE_PORT> Destination <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT>
+ */
+            if (pf->direction == OGS_FLOW_DOWNLINK_ONLY)
+                ogs_ipfw_rule_swap(&pf->ipfw_rule);
 
             if (pf->flow_description)
                 ogs_free(pf->flow_description);
-            pf->flow_description =
-                ogs_ipfw_encode_flow_description(&pf->ipfw_rule);
-            pf->direction = tft.pf[i].direction;
+
+/*
+ * Issue #338
+ *
+ * <DOWNLINK>
+ * RULE : Source <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> Destination <UE_IP> <UE_PORT>
+ * -->
+ * GX : permit out from <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> to <UE_IP> <UE_PORT>
+ * PFCP : permit out from <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> to <UE_IP> <UE_PORT>
+ *
+ * <UPLINK>
+ * RULE : Source <UE_IP> <UE_PORT> Destination <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT>
+ * -->
+ * GX : permit out from <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> to <UE_IP> <UE_PORT>
+ * PFCP : permit out from <P-CSCF_RTP_IP> <P-CSCF_RTP_PORT> to <UE_IP> <UE_PORT>
+ */
+            if (pf->direction == OGS_FLOW_UPLINK_ONLY) {
+                ogs_ipfw_rule_t tmp;
+                ogs_ipfw_copy_and_swap(&tmp, &pf->ipfw_rule);
+                pf->flow_description =
+                    ogs_ipfw_encode_flow_description(&tmp);
+            } else {
+                pf->flow_description =
+                    ogs_ipfw_encode_flow_description(&pf->ipfw_rule);
+            }
 
             tft_update = 1;
         }
@@ -794,6 +928,24 @@ void smf_s5c_handle_bearer_resource_command(
         if (qos_update)
             xact->update_flags |= OGS_GTP_MODIFY_QOS_UPDATE;
     }
+
+    /* IMPORTANT:
+     *
+     * When initiaited by Bearer Resource Command, there must be bearer context
+     * in the Transaction. Otherwise, the beare context cannot be found
+     * in GTP response message.
+     *
+     * For example,
+     * 1. MME sends Bearer Resource Command to SGW-C, SMF.
+     * 2. SMF sends Update/Delete Bearer Request to the SGW-C, MME.
+     * 3. MME sends Update/Delete Bearer Response to thw SGW-C, SMF.
+     *
+     * On number 3 step, if MME sends Response without Bearer Context,
+     * we need a way to find Bearer context.
+     *
+     * To do this, I saved Bearer Context in Transaction Context.
+     */
+    xact->data = bearer;
 
     rv = ogs_gtp_xact_commit(xact);
     ogs_expect(rv == OGS_OK);

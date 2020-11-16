@@ -27,6 +27,7 @@
 #include "ogs-gtp.h"
 #include "ogs-nas-eps.h"
 #include "ogs-app.h"
+#include "ogs-sctp.h"
 
 /* S1AP */
 #include "S1AP_Cause.h"
@@ -209,10 +210,7 @@ typedef struct mme_enb_s {
     ogs_fsm_t       sm;         /* A state machine */
 
     uint32_t        enb_id;     /* eNB_ID received from eNB */
-    int             sock_type;  /* SOCK_STREAM or SOCK_SEQPACKET */
-    ogs_sock_t      *sock;      /* eNB S1AP Socket */
-    ogs_sockaddr_t  *addr;      /* eNB S1AP Address */
-    ogs_poll_t      *poll;      /* eNB S1AP Poll */
+    ogs_sctp_sock_t sctp;       /* SCTP socket */
 
     struct {
         bool s1_setup_success;  /* eNB S1AP Setup complete successfuly */
@@ -220,7 +218,6 @@ typedef struct mme_enb_s {
 
     uint16_t        max_num_of_ostreams;/* SCTP Max num of outbound streams */
     uint16_t        ostream_id;         /* enb_ostream_id generator */
-
 
     uint8_t         num_of_supported_ta_list;
     ogs_eps_tai_t   supported_ta_list[OGS_MAX_NUM_OF_TAI*OGS_MAX_NUM_OF_BPLMN];
@@ -254,6 +251,9 @@ struct enb_ue_s {
         ogs_e_cgi_t     e_cgi;
     } saved;
 
+    /* S1 Holding timer for removing this context */
+    ogs_timer_t     *t_s1_holding;
+
     /* Store by UE Context Release Command
      * Retrieve by UE Context Release Complete */
 #define S1AP_UE_CTX_REL_INVALID_ACTION                      0
@@ -261,6 +261,7 @@ struct enb_ue_s {
 #define S1AP_UE_CTX_REL_S1_REMOVE_AND_UNLINK                2
 #define S1AP_UE_CTX_REL_UE_CONTEXT_REMOVE                   3
 #define S1AP_UE_CTX_REL_DELETE_INDIRECT_TUNNEL              4
+#define S1AP_UE_CTX_REL_S1_PAGING                           5
     uint8_t         ue_ctx_rel_action;
 
     /* Related Context */
@@ -352,6 +353,7 @@ struct mme_ue_s {
     uint8_t         xres_len;
     uint8_t         kasme[OGS_SHA256_DIGEST_SIZE];
     uint8_t         rand[OGS_RAND_LEN];
+    uint8_t         autn[OGS_AUTN_LEN];
     uint8_t         knas_int[OGS_SHA256_DIGEST_SIZE/2]; 
     uint8_t         knas_enc[OGS_SHA256_DIGEST_SIZE/2];
     uint32_t        dl_count;
@@ -397,16 +399,17 @@ struct mme_ue_s {
 #define CLEAR_EPS_BEARER_ID(__mME) \
     do { \
         ogs_assert((__mME)); \
-        mme_ebi_pool_final(__mME); \
-        mme_ebi_pool_init(__mME); \
+        mme_ebi_pool_clear(__mME); \
     } while(0)
     OGS_POOL(ebi_pool, uint8_t);
 
+    /* Paging Info */
 #define ECM_CONNECTED(__mME) \
-    ((__mME) && ((__mME)->enb_ue != NULL))
-#define ECM_IDLE(__mME) (!ECM_CONNECTED(__mME))
-    /* S1 UE context */
-    enb_ue_t        *enb_ue;
+    ((__mME) && ((__mME)->enb_ue != NULL) && enb_ue_cycle((__mME)->enb_ue))
+#define ECM_IDLE(__mME) \
+    ((__mME) && \
+     (((__mME)->enb_ue == NULL) || (enb_ue_cycle((__mME)->enb_ue) == NULL)))
+    enb_ue_t        *enb_ue;    /* S1 UE context */
 
     /* Save PDN Connectivity Request */
     ogs_nas_esm_message_container_t pdn_connectivity_request;
@@ -501,17 +504,6 @@ struct mme_ue_s {
     mme_csmap_t     *csmap;
 };
 
-#define MME_HAVE_SGW_S1U_PATH(__sESS) \
-    ((__sESS) && (mme_bearer_first(__sESS)) && \
-     ((mme_default_bearer_in_sess(__sESS)->sgw_s1u_teid)))
-#define CLEAR_SGW_S1U_PATH(__sESS) \
-    do { \
-        mme_bearer_t *__bEARER = NULL; \
-        ogs_assert((__sESS)); \
-        __bEARER = mme_default_bearer_in_sess(__sESS); \
-        __bEARER->sgw_s1u_teid = 0; \
-    } while(0)
-
 #define SESSION_CONTEXT_IS_AVAILABLE(__mME) \
      ((__mME) && ((__mME)->sgw_s11_teid))
 
@@ -523,8 +515,10 @@ struct mme_ue_s {
         ogs_assert((__mME)); \
         (__mME)->sgw_s11_teid = 0; \
         (__mME)->session_context_will_deleted = 0; \
-        CLEAR_EPS_BEARER_ID((__mME)); \
     } while(0)
+
+#define ACTIVE_EPS_BEARERS_IS_AVAIABLE(__mME) \
+    (mme_ue_have_active_eps_bearers(__mME))
 typedef struct mme_sess_s {
     ogs_lnode_t     lnode;
 
@@ -551,17 +545,23 @@ typedef struct mme_sess_s {
     ogs_tlv_octet_t pgw_pco;
 } mme_sess_t;
 
-#define BEARER_CONTEXT_IS_ACTIVE(__mME)  \
-    (mme_bearer_is_inactive(__mME) == 0)
-#define CLEAR_BEARER_CONTEXT(__mME)   \
-    mme_bearer_set_inactive(__mME)
-
 #define MME_HAVE_ENB_S1U_PATH(__bEARER) \
     ((__bEARER) && ((__bEARER)->enb_s1u_teid))
 #define CLEAR_ENB_S1U_PATH(__bEARER) \
     do { \
         ogs_assert((__bEARER)); \
         (__bEARER)->enb_s1u_teid = 0; \
+    } while(0)
+
+#define MME_HAVE_SGW_S1U_PATH(__sESS) \
+    ((__sESS) && (mme_bearer_first(__sESS)) && \
+     ((mme_default_bearer_in_sess(__sESS)->sgw_s1u_teid)))
+#define CLEAR_SGW_S1U_PATH(__sESS) \
+    do { \
+        mme_bearer_t *__bEARER = NULL; \
+        ogs_assert((__sESS)); \
+        __bEARER = mme_default_bearer_in_sess(__sESS); \
+        __bEARER->sgw_s1u_teid = 0; \
     } while(0)
 
 #define MME_HAVE_ENB_DL_INDIRECT_TUNNEL(__bEARER) \
@@ -585,7 +585,8 @@ typedef struct mme_bearer_s {
     uint32_t        index;
     ogs_fsm_t       sm;             /* State Machine */
 
-    uint8_t         *ebi;           /* EPS Bearer ID */
+    uint8_t         *ebi_node;      /* Pool-Node for EPS Bearer ID */
+    uint8_t         ebi;            /* EPS Bearer ID */
 
     uint32_t        enb_s1u_teid;
     ogs_ip_t        enb_s1u_ip;
@@ -674,18 +675,19 @@ int mme_enb_sock_type(ogs_sock_t *sock);
 
 enb_ue_t *enb_ue_add(mme_enb_t *enb, uint32_t enb_ue_s1ap_id);
 void enb_ue_remove(enb_ue_t *enb_ue);
-void enb_ue_remove_in_enb(mme_enb_t *enb);
 void enb_ue_switch_to_enb(enb_ue_t *enb_ue, mme_enb_t *new_enb);
 enb_ue_t *enb_ue_find_by_enb_ue_s1ap_id(
         mme_enb_t *enb, uint32_t enb_ue_s1ap_id);
 enb_ue_t *enb_ue_find(uint32_t index);
 enb_ue_t *enb_ue_find_by_mme_ue_s1ap_id(uint32_t mme_ue_s1ap_id);
-enb_ue_t *enb_ue_first_in_enb(mme_enb_t *enb);
-enb_ue_t *enb_ue_next_in_enb(enb_ue_t *enb_ue);
+enb_ue_t *enb_ue_cycle(enb_ue_t *enb_ue);
 
 mme_ue_t *mme_ue_add(enb_ue_t *enb_ue);
 void mme_ue_remove(mme_ue_t *mme_ue);
 void mme_ue_remove_all(void);
+
+void mme_ue_fsm_init(mme_ue_t *mme_ue);
+void mme_ue_fsm_fini(mme_ue_t *mme_ue);
 
 mme_ue_t *mme_ue_find_by_imsi(uint8_t *imsi, int imsi_len);
 mme_ue_t *mme_ue_find_by_imsi_bcd(char *imsi_bcd);
@@ -695,8 +697,10 @@ mme_ue_t *mme_ue_find_by_teid(uint32_t teid);
 mme_ue_t *mme_ue_find_by_message(ogs_nas_eps_message_t *message);
 int mme_ue_set_imsi(mme_ue_t *mme_ue, char *imsi_bcd);
 
-int mme_ue_have_indirect_tunnel(mme_ue_t *mme_ue);
-int mme_ue_clear_indirect_tunnel(mme_ue_t *mme_ue);
+bool mme_ue_have_indirect_tunnel(mme_ue_t *mme_ue);
+void mme_ue_clear_indirect_tunnel(mme_ue_t *mme_ue);
+
+bool mme_ue_have_active_eps_bearers(mme_ue_t *mme_ue);
 
 /* 
  * o RECV Initial UE-Message : S-TMSI
@@ -758,9 +762,13 @@ void mme_sess_remove_all(mme_ue_t *mme_ue);
 mme_sess_t *mme_sess_find_by_pti(mme_ue_t *mme_ue, uint8_t pti);
 mme_sess_t *mme_sess_find_by_ebi(mme_ue_t *mme_ue, uint8_t ebi);
 mme_sess_t *mme_sess_find_by_apn(mme_ue_t *mme_ue, char *apn);
+
 mme_sess_t *mme_sess_first(mme_ue_t *mme_ue);
 mme_sess_t *mme_sess_next(mme_sess_t *sess);
 unsigned int mme_sess_count(mme_ue_t *mme_ue);
+
+#define SESSION_CONTEXT_IN_ATTACH(__sESS) mme_sess_in_attach(__sESS)
+bool mme_sess_in_attach(mme_sess_t *sess);
 
 mme_bearer_t *mme_bearer_add(mme_sess_t *sess);
 void mme_bearer_remove(mme_bearer_t *bearer);
@@ -773,9 +781,7 @@ mme_bearer_t *mme_default_bearer_in_sess(mme_sess_t *sess);
 mme_bearer_t *mme_linked_bearer(mme_bearer_t *bearer);
 mme_bearer_t *mme_bearer_first(mme_sess_t *sess);
 mme_bearer_t *mme_bearer_next(mme_bearer_t *bearer);
-
-int mme_bearer_is_inactive(mme_ue_t *mme_ue);
-int mme_bearer_set_inactive(mme_ue_t *mme_ue);
+mme_bearer_t *mme_bearer_cycle(mme_bearer_t *bearer);
 
 void mme_pdn_remove_all(mme_ue_t *mme_ue);
 ogs_pdn_t *mme_pdn_find_by_apn(mme_ue_t *mme_ue, char *apn);
@@ -789,16 +795,10 @@ int mme_m_tmsi_free(mme_m_tmsi_t *tmsi);
 
 void mme_ebi_pool_init(mme_ue_t *mme_ue);
 void mme_ebi_pool_final(mme_ue_t *mme_ue);
+void mme_ebi_pool_clear(mme_ue_t *mme_ue);
 
 uint8_t mme_selected_int_algorithm(mme_ue_t *mme_ue);
 uint8_t mme_selected_enc_algorithm(mme_ue_t *mme_ue);
-
-void stats_add_ue(void);
-void stats_remove_ue(void);
-void stats_add_enb(void);
-void stats_remove_enb(void);
-void stats_add_mme_session(void);
-void stats_remove_mme_session(void);
 
 #ifdef __cplusplus
 }

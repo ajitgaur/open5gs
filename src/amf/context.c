@@ -31,6 +31,14 @@ static OGS_POOL(amf_sess_pool, amf_sess_t);
 
 static int context_initialized = 0;
 
+static int num_of_ran_ue = 0;
+static int num_of_amf_sess = 0;
+
+static void stats_add_ran_ue(void);
+static void stats_remove_ran_ue(void);
+static void stats_add_amf_session(void);
+static void stats_remove_amf_session(void);
+
 void amf_context_init(void)
 {
     ogs_assert(context_initialized == 0);
@@ -129,12 +137,12 @@ static int amf_context_validation(void)
     }
 
     if (self.num_of_plmn_support == 0) {
-        ogs_error("No amf.plmn in '%s'", ogs_app()->file);
+        ogs_error("No amf.plmn_support in '%s'", ogs_app()->file);
         return OGS_ERROR;
     }
 
     if (self.plmn_support[0].num_of_s_nssai == 0) {
-        ogs_error("No amf.plmn.s_nssai in '%s'", ogs_app()->file);
+        ogs_error("No amf.plmn_support.s_nssai in '%s'", ogs_app()->file);
         return OGS_ERROR;
     }
 
@@ -517,38 +525,38 @@ int amf_context_parse_config(void)
                     if (list2->num || num_of_list0) {
                         self.num_of_served_tai++;
                     }
-                } else if (!strcmp(amf_key, "plmn")) {
-                    ogs_yaml_iter_t plmn_array, plmn_iter;
-                    ogs_yaml_iter_recurse(&amf_iter, &plmn_array);
+                } else if (!strcmp(amf_key, "plmn_support")) {
+                    ogs_yaml_iter_t plmn_support_array, plmn_support_iter;
+                    ogs_yaml_iter_recurse(&amf_iter, &plmn_support_array);
                     do {
                         const char *mnc = NULL, *mcc = NULL;
                         ogs_assert(self.num_of_plmn_support <=
                                 OGS_MAX_NUM_OF_PLMN);
 
-                        if (ogs_yaml_iter_type(&plmn_array) ==
+                        if (ogs_yaml_iter_type(&plmn_support_array) ==
                                 YAML_MAPPING_NODE) {
-                            memcpy(&plmn_iter, &plmn_array,
+                            memcpy(&plmn_support_iter, &plmn_support_array,
                                     sizeof(ogs_yaml_iter_t));
-                        } else if (ogs_yaml_iter_type(&plmn_array) ==
+                        } else if (ogs_yaml_iter_type(&plmn_support_array) ==
                             YAML_SEQUENCE_NODE) {
-                            if (!ogs_yaml_iter_next(&plmn_array))
+                            if (!ogs_yaml_iter_next(&plmn_support_array))
                                 break;
-                            ogs_yaml_iter_recurse(&plmn_array,
-                                    &plmn_iter);
-                        } else if (ogs_yaml_iter_type(&plmn_array) ==
+                            ogs_yaml_iter_recurse(&plmn_support_array,
+                                    &plmn_support_iter);
+                        } else if (ogs_yaml_iter_type(&plmn_support_array) ==
                             YAML_SCALAR_NODE) {
                             break;
                         } else
                             ogs_assert_if_reached();
 
-                        while (ogs_yaml_iter_next(&plmn_iter)) {
-                            const char *plmn_key =
-                                ogs_yaml_iter_key(&plmn_iter);
-                            ogs_assert(plmn_key);
-                            if (!strcmp(plmn_key, "plmn_id")) {
+                        while (ogs_yaml_iter_next(&plmn_support_iter)) {
+                            const char *plmn_support_key =
+                                ogs_yaml_iter_key(&plmn_support_iter);
+                            ogs_assert(plmn_support_key);
+                            if (!strcmp(plmn_support_key, "plmn_id")) {
                                 ogs_yaml_iter_t plmn_id_iter;
 
-                                ogs_yaml_iter_recurse(&plmn_iter,
+                                ogs_yaml_iter_recurse(&plmn_support_iter,
                                         &plmn_id_iter);
                                 while (ogs_yaml_iter_next(&plmn_id_iter)) {
                                     const char *plmn_id_key =
@@ -570,9 +578,9 @@ int amf_context_parse_config(void)
                                                 plmn_id,
                                         atoi(mcc), atoi(mnc), strlen(mnc));
                                 }
-                            } else if (!strcmp(plmn_key, "s_nssai")) {
+                            } else if (!strcmp(plmn_support_key, "s_nssai")) {
                                 ogs_yaml_iter_t s_nssai_array, s_nssai_iter;
-                                ogs_yaml_iter_recurse(&plmn_iter,
+                                ogs_yaml_iter_recurse(&plmn_support_iter,
                                         &s_nssai_array);
                                 do {
                                     ogs_s_nssai_t *s_nssai = NULL;
@@ -643,7 +651,7 @@ int amf_context_parse_config(void)
                                 } while (ogs_yaml_iter_type(&s_nssai_array) ==
                                         YAML_SEQUENCE_NODE);
                             } else
-                                ogs_warn("unknown key `%s`", plmn_key);
+                                ogs_warn("unknown key `%s`", plmn_support_key);
                         }
 
                         if (self.plmn_support[
@@ -659,7 +667,7 @@ int amf_context_parse_config(void)
                             self.plmn_support[
                                 self.num_of_plmn_support].num_of_s_nssai = 0;
                         }
-                    } while (ogs_yaml_iter_type(&plmn_array) ==
+                    } while (ogs_yaml_iter_type(&plmn_support_array) ==
                             YAML_SEQUENCE_NODE);
                 } else if (!strcmp(amf_key, "security")) {
                     ogs_yaml_iter_t security_iter;
@@ -825,9 +833,15 @@ amf_gnb_t *amf_gnb_add(ogs_sock_t *sock, ogs_sockaddr_t *addr)
     ogs_assert(gnb);
     memset(gnb, 0, sizeof *gnb);
 
-    gnb->sock = sock;
-    gnb->addr = addr;
-    gnb->sock_type = amf_gnb_sock_type(gnb->sock);
+    gnb->sctp.sock = sock;
+    gnb->sctp.addr = addr;
+    gnb->sctp.type = amf_gnb_sock_type(gnb->sctp.sock);
+
+    if (gnb->sctp.type == SOCK_STREAM) {
+        gnb->sctp.poll.read = ogs_pollset_add(ogs_app()->pollset,
+            OGS_POLLIN, sock->fd, ngap_recv_upcall, sock);
+        ogs_assert(gnb->sctp.poll.read);
+    }
 
     gnb->max_num_of_ostreams = DEFAULT_SCTP_MAX_NUM_OF_OSTREAMS;
     gnb->ostream_id = 0;
@@ -839,13 +853,8 @@ amf_gnb_t *amf_gnb_add(ogs_sock_t *sock, ogs_sockaddr_t *addr)
 
     ogs_list_init(&gnb->ran_ue_list);
 
-    if (gnb->sock_type == SOCK_STREAM) {
-        gnb->poll = ogs_pollset_add(ogs_app()->pollset,
-            OGS_POLLIN, sock->fd, ngap_recv_upcall, sock);
-        ogs_assert(gnb->poll);
-    }
-
-    ogs_hash_set(self.gnb_addr_hash, gnb->addr, sizeof(ogs_sockaddr_t), gnb);
+    ogs_hash_set(self.gnb_addr_hash,
+            gnb->sctp.addr, sizeof(ogs_sockaddr_t), gnb);
 
     memset(&e, 0, sizeof(e));
     e.gnb = gnb;
@@ -853,6 +862,9 @@ amf_gnb_t *amf_gnb_add(ogs_sock_t *sock, ogs_sockaddr_t *addr)
     ogs_fsm_init(&gnb->sm, &e);
 
     ogs_list_add(&self.gnb_list, gnb);
+
+    ogs_info("[Added] Number of gNBs is now %d",
+            ogs_list_count(&self.gnb_list));
 
     return gnb;
 }
@@ -862,7 +874,7 @@ int amf_gnb_remove(amf_gnb_t *gnb)
     amf_event_t e;
 
     ogs_assert(gnb);
-    ogs_assert(gnb->sock);
+    ogs_assert(gnb->sctp.sock);
 
     ogs_list_remove(&self.gnb_list, gnb);
 
@@ -871,19 +883,16 @@ int amf_gnb_remove(amf_gnb_t *gnb)
     ogs_fsm_fini(&gnb->sm, &e);
     ogs_fsm_delete(&gnb->sm);
 
-    ogs_hash_set(self.gnb_addr_hash, gnb->addr, sizeof(ogs_sockaddr_t), NULL);
+    ogs_hash_set(self.gnb_addr_hash,
+            gnb->sctp.addr, sizeof(ogs_sockaddr_t), NULL);
     ogs_hash_set(self.gnb_id_hash, &gnb->gnb_id, sizeof(gnb->gnb_id), NULL);
 
-    ran_ue_remove_in_gnb(gnb);
-
-    if (gnb->sock_type == SOCK_STREAM) {
-        ogs_pollset_remove(gnb->poll);
-        ogs_sctp_destroy(gnb->sock);
-    }
-
-    ogs_free(gnb->addr);
+    ogs_sctp_flush_and_destroy(&gnb->sctp);
 
     ogs_pool_free(&amf_gnb_pool, gnb);
+
+    ogs_info("[Removed] Number of gNBs is now %d",
+            ogs_list_count(&self.gnb_list));
 
     return OGS_OK;
 }
@@ -967,6 +976,8 @@ ran_ue_t *ran_ue_add(amf_gnb_t *gnb, uint32_t ran_ue_ngap_id)
 
     ogs_list_add(&gnb->ran_ue_list, ran_ue);
 
+    stats_add_ran_ue();
+
     return ran_ue;
 }
 
@@ -975,26 +986,14 @@ void ran_ue_remove(ran_ue_t *ran_ue)
     ogs_assert(ran_ue);
     ogs_assert(ran_ue->gnb);
 
-    /* De-associate S1 with NAS/EMM */
-    ran_ue_deassociate(ran_ue);
-
     ogs_list_remove(&ran_ue->gnb->ran_ue_list, ran_ue);
 
+    if (ran_ue->t_ng_holding)
+        ogs_timer_delete(ran_ue->t_ng_holding);
+
     ogs_pool_free(&ran_ue_pool, ran_ue);
-}
 
-void ran_ue_remove_in_gnb(amf_gnb_t *gnb)
-{
-    ran_ue_t *ran_ue = NULL, *next_ran_ue = NULL;
-    
-    ran_ue = ran_ue_first_in_gnb(gnb);
-    while (ran_ue) {
-        next_ran_ue = ran_ue_next_in_gnb(ran_ue);
-
-        ran_ue_remove(ran_ue);
-
-        ran_ue = next_ran_ue;
-    }
+    stats_remove_ran_ue();
 }
 
 void ran_ue_switch_to_gnb(ran_ue_t *ran_ue, amf_gnb_t *new_gnb)
@@ -1018,12 +1017,9 @@ ran_ue_t *ran_ue_find_by_ran_ue_ngap_id(
 {
     ran_ue_t *ran_ue = NULL;
     
-    ran_ue = ran_ue_first_in_gnb(gnb);
-    while (ran_ue) {
+    ogs_list_for_each(&gnb->ran_ue_list, ran_ue) {
         if (ran_ue_ngap_id == ran_ue->ran_ue_ngap_id)
             break;
-
-        ran_ue = ran_ue_next_in_gnb(ran_ue);
     }
 
     return ran_ue;
@@ -1040,14 +1036,9 @@ ran_ue_t *ran_ue_find_by_amf_ue_ngap_id(uint64_t amf_ue_ngap_id)
     return ran_ue_find(amf_ue_ngap_id);
 }
 
-ran_ue_t *ran_ue_first_in_gnb(amf_gnb_t *gnb)
+ran_ue_t *ran_ue_cycle(ran_ue_t *ran_ue)
 {
-    return ogs_list_first(&gnb->ran_ue_list);
-}
-
-ran_ue_t *ran_ue_next_in_gnb(ran_ue_t *ran_ue)
-{
-    return ogs_list_next(ran_ue);
+    return ogs_pool_cycle(&ran_ue_pool, ran_ue);
 }
 
 static int amf_ue_new_guti(amf_ue_t *amf_ue)
@@ -1079,7 +1070,6 @@ amf_ue_t *amf_ue_add(ran_ue_t *ran_ue)
 {
     amf_gnb_t *gnb = NULL;
     amf_ue_t *amf_ue = NULL;
-    amf_event_t e;
 
     ogs_assert(ran_ue);
     gnb = ran_ue->gnb;
@@ -1119,13 +1109,12 @@ amf_ue_t *amf_ue_add(ran_ue_t *ran_ue)
             ogs_app()->timer_mgr, amf_timer_t3570_expire, amf_ue);
     amf_ue->t3570.pkbuf = NULL;
 
-    /* Create FSM */
-    memset(&e, 0, sizeof(e));
-    e.amf_ue = amf_ue;
-    ogs_fsm_create(&amf_ue->sm, gmm_state_initial, gmm_state_final);
-    ogs_fsm_init(&amf_ue->sm, &e);
+    amf_ue_fsm_init(amf_ue);
 
     ogs_list_add(&self.amf_ue_list, amf_ue);
+
+    ogs_info("[Added] Number of AMF-UEs is now %d",
+            ogs_list_count(&self.amf_ue_list));
 
     return amf_ue;
 }
@@ -1133,16 +1122,12 @@ amf_ue_t *amf_ue_add(ran_ue_t *ran_ue)
 void amf_ue_remove(amf_ue_t *amf_ue)
 {
     int i;
-    amf_event_t e;
 
     ogs_assert(amf_ue);
 
     ogs_list_remove(&self.amf_ue_list, amf_ue);
 
-    memset(&e, 0, sizeof(e));
-    e.amf_ue = amf_ue;
-    ogs_fsm_fini(&amf_ue->sm, &e);
-    ogs_fsm_delete(&amf_ue->sm);
+    amf_ue_fsm_fini(amf_ue);
 
     /* Clear hash table */
     if (amf_ue->m_tmsi) {
@@ -1193,6 +1178,9 @@ void amf_ue_remove(amf_ue_t *amf_ue)
     amf_sess_remove_all(amf_ue);
 
     ogs_pool_free(&amf_ue_pool, amf_ue);
+
+    ogs_info("[Removed] Number of AMF-UEs is now %d",
+            ogs_list_count(&self.amf_ue_list));
 }
 
 void amf_ue_remove_all()
@@ -1201,6 +1189,30 @@ void amf_ue_remove_all()
 
     ogs_list_for_each_safe(&self.amf_ue_list, next, amf_ue)
         amf_ue_remove(amf_ue);
+}
+
+void amf_ue_fsm_init(amf_ue_t *amf_ue)
+{
+    amf_event_t e;
+
+    ogs_assert(amf_ue);
+
+    memset(&e, 0, sizeof(e));
+    e.amf_ue = amf_ue;
+    ogs_fsm_create(&amf_ue->sm, gmm_state_initial, gmm_state_final);
+    ogs_fsm_init(&amf_ue->sm, &e);
+}
+
+void amf_ue_fsm_fini(amf_ue_t *amf_ue)
+{
+    amf_event_t e;
+
+    ogs_assert(amf_ue);
+
+    memset(&e, 0, sizeof(e));
+    e.amf_ue = amf_ue;
+    ogs_fsm_fini(&amf_ue->sm, &e);
+    ogs_fsm_delete(&amf_ue->sm);
 }
 
 amf_ue_t *amf_ue_find_by_guti(ogs_nas_5gs_guti_t *guti)
@@ -1260,11 +1272,13 @@ amf_ue_t *amf_ue_find_by_message(ogs_nas_5gs_message_t *message)
         switch (mobile_identity_header->type) {
         case OGS_NAS_5GS_MOBILE_IDENTITY_SUCI:
             suci = ogs_nas_5gs_suci_from_mobile_identity(mobile_identity);
+            ogs_assert(suci);
+
             amf_ue = amf_ue_find_by_suci(suci);
             if (amf_ue) {
-                ogs_trace("[%s] known UE by SUCI", suci);
+                ogs_info("[%s] known UE by SUCI", suci);
             } else {
-                ogs_trace("[%s] Unknown UE by SUCI", suci);
+                ogs_info("[%s] Unknown UE by SUCI", suci);
             }
             ogs_free(suci);
             break;
@@ -1283,7 +1297,8 @@ amf_ue_t *amf_ue_find_by_message(ogs_nas_5gs_message_t *message)
 
             amf_ue = amf_ue_find_by_guti(&nas_guti);
             if (amf_ue) {
-                ogs_debug("Known UE by 5G-S_TMSI[AMF_ID:0x%x,M_TMSI:0x%x]",
+                ogs_info("[%s] Known UE by 5G-S_TMSI[AMF_ID:0x%x,M_TMSI:0x%x]",
+                    amf_ue->suci ? amf_ue->suci : "Unknown",
                     ogs_amf_id_hexdump(&nas_guti.amf_id), nas_guti.m_tmsi);
             } else {
                 ogs_warn("Unknown UE by 5G-S_TMSI[AMF_ID:0x%x,M_TMSI:0x%x]",
@@ -1295,40 +1310,6 @@ amf_ue_t *amf_ue_find_by_message(ogs_nas_5gs_message_t *message)
 
         }
         break;
-#if 0
-    case OGS_NAS_5GS_TRACKING_AREA_UPDATE_REQUEST:
-        tau_request = &message->gmm.tracking_area_update_request;
-        eps_mobile_identity = &tau_request->old_guti;
-
-        switch(eps_mobile_identity->imsi.type) {
-        case OGS_NAS_5GS_MOBILE_IDENTITY_GUTI:
-            eps_mobile_identity_guti = &eps_mobile_identity->guti;
-
-            ogs_nas_guti.nas_plmn_id = eps_mobile_identity_guti->nas_plmn_id;
-            ogs_nas_guti.amf_gid = eps_mobile_identity_guti->amf_gid;
-            ogs_nas_guti.amf_code = eps_mobile_identity_guti->amf_code;
-            ogs_nas_guti.m_tmsi = eps_mobile_identity_guti->m_tmsi;
-
-            amf_ue = amf_ue_find_by_guti(&ogs_nas_guti);
-            if (amf_ue) {
-                ogs_trace("Known UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
-                        ogs_nas_guti.amf_gid,
-                        ogs_nas_guti.amf_code,
-                        ogs_nas_guti.m_tmsi);
-            } else {
-                ogs_warn("Unknown UE by GUTI[G:%d,C:%d,M_TMSI:0x%x]",
-                        ogs_nas_guti.amf_gid,
-                        ogs_nas_guti.amf_code,
-                        ogs_nas_guti.m_tmsi);
-            }
-            break;
-        default:
-            ogs_error("Unknown IMSI type [%d]", eps_mobile_identity->imsi.type);
-            break;
-        }
-        break;
-
-#endif
     default:
         break;
     }
@@ -1354,12 +1335,11 @@ void amf_ue_set_suci(amf_ue_t *amf_ue,
         /* Check if OLD amf_ue_t is different with NEW amf_ue_t */
         if (ogs_pool_index(&amf_ue_pool, amf_ue) !=
             ogs_pool_index(&amf_ue_pool, old_amf_ue)) {
-
             ogs_warn("[%s] OLD UE Context Release", suci);
             if (CM_CONNECTED(old_amf_ue)) {
-               /* Implcit NG release */
-                ogs_debug("[%s] Implicit NG release", suci);
-                ogs_debug("[%s]    RAN_UE_NGAP_ID[%d] AMF_UE_NGAP_ID[%lld]",
+                /* Implcit NG release */
+                ogs_info("[%s] Implicit NG release", suci);
+                ogs_info("[%s]    RAN_UE_NGAP_ID[%d] AMF_UE_NGAP_ID[%lld]",
                         old_amf_ue->suci, old_amf_ue->ran_ue->ran_ue_ngap_id,
                         (long long)old_amf_ue->ran_ue->amf_ue_ngap_id);
                 ran_ue_remove(old_amf_ue->ran_ue);
@@ -1473,6 +1453,8 @@ amf_sess_t *amf_sess_add(amf_ue_t *amf_ue, uint8_t psi)
 
     ogs_list_add(&amf_ue->sess_list, sess);
 
+    stats_add_amf_session();
+
     return sess;
 }
 
@@ -1501,6 +1483,8 @@ void amf_sess_remove(amf_sess_t *sess)
     OGS_TLV_CLEAR_DATA(&sess->pgw_pco);
 
     ogs_pool_free(&amf_sess_pool, sess);
+
+    stats_remove_amf_session();
 }
 
 void amf_sess_remove_all(amf_ue_t *amf_ue)
@@ -1707,4 +1691,28 @@ uint8_t amf_selected_enc_algorithm(amf_ue_t *amf_ue)
     }
 
     return 0;
+}
+
+static void stats_add_ran_ue(void)
+{
+    num_of_ran_ue = num_of_ran_ue + 1;
+    ogs_info("[Added] Number of gNB-UEs is now %d", num_of_ran_ue);
+}
+
+static void stats_remove_ran_ue(void)
+{
+    num_of_ran_ue = num_of_ran_ue - 1;
+    ogs_info("[Removed] Number of gNB-UEs is now %d", num_of_ran_ue);
+}
+
+static void stats_add_amf_session(void)
+{
+    num_of_amf_sess = num_of_amf_sess + 1;
+    ogs_info("[Added] Number of AMF-Sessions is now %d", num_of_amf_sess);
+}
+
+static void stats_remove_amf_session(void)
+{
+    num_of_amf_sess = num_of_amf_sess - 1;
+    ogs_info("[Removed] Number of AMF-Sessions is now %d", num_of_amf_sess);
 }

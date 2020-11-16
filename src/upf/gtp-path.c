@@ -41,6 +41,8 @@
 
 #define UPF_GTP_HANDLED     1
 
+static ogs_pkbuf_pool_t *packet_pool = NULL;
+
 static void upf_gtp_handle_multicast(ogs_pkbuf_t *recvbuf);
 static int upf_gtp_handle_slaac(upf_sess_t *sess, ogs_pkbuf_t *recvbuf);
 static int upf_gtp_send_router_advertisement(
@@ -53,9 +55,10 @@ static void _gtpv1_tun_recv_cb(short when, ogs_socket_t fd, void *data)
     ogs_pfcp_pdr_t *pdr = NULL;
     ogs_pfcp_user_plane_report_t report;
 
-    recvbuf = ogs_pkbuf_alloc(NULL, OGS_MAX_SDU_LEN);
+    recvbuf = ogs_pkbuf_alloc(packet_pool, OGS_MAX_PKT_LEN);
+    ogs_assert(recvbuf);
     ogs_pkbuf_reserve(recvbuf, OGS_GTPV1U_5GC_HEADER_LEN);
-    ogs_pkbuf_put(recvbuf, OGS_MAX_SDU_LEN-OGS_GTPV1U_5GC_HEADER_LEN);
+    ogs_pkbuf_put(recvbuf, OGS_MAX_PKT_LEN-OGS_GTPV1U_5GC_HEADER_LEN);
 
     n = ogs_read(fd, recvbuf->data, recvbuf->len);
     if (n <= 0) {
@@ -82,7 +85,7 @@ static void _gtpv1_tun_recv_cb(short when, ogs_socket_t fd, void *data)
 
 static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
 {
-    int rv, len;
+    int len;
     ssize_t size;
     char buf[OGS_ADDRSTRLEN];
 
@@ -90,19 +93,18 @@ static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
     ogs_sockaddr_t from;
 
     ogs_gtp_header_t *gtp_h = NULL;
-    struct ip *ip_h = NULL;
+#if 0
+    ogs_pfcp_user_plane_report_t report;
+#endif
 
     uint32_t teid;
     uint8_t qfi;
-    ogs_pfcp_pdr_t *pdr = NULL;
-    upf_sess_t *sess = NULL;
-    ogs_pfcp_subnet_t *subnet = NULL;
-    ogs_pfcp_dev_t *dev = NULL;
 
     ogs_assert(fd != INVALID_SOCKET);
 
-    pkbuf = ogs_pkbuf_alloc(NULL, OGS_MAX_SDU_LEN);
-    ogs_pkbuf_put(pkbuf, OGS_MAX_SDU_LEN);
+    pkbuf = ogs_pkbuf_alloc(NULL, OGS_MAX_PKT_LEN);
+    ogs_assert(pkbuf);
+    ogs_pkbuf_put(pkbuf, OGS_MAX_PKT_LEN);
 
     size = ogs_recvfrom(fd, pkbuf->data, pkbuf->len, 0, &from);
     if (size <= 0) {
@@ -146,25 +148,8 @@ static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
 
     teid = be32toh(gtp_h->teid);
 
-    if (gtp_h->type == OGS_GTPU_MSGTYPE_END_MARKER) {
-        ogs_debug("[RECV] End Marker from [%s] : TEID[0x%x]",
-                OGS_ADDR(&from, buf), teid);
-        goto cleanup;
-    }
-
-    if (gtp_h->type == OGS_GTPU_MSGTYPE_ERR_IND) {
-        ogs_error("[RECV] Error Indication from [%s]", OGS_ADDR(&from, buf));
-        goto cleanup;
-    }
-
-    if (gtp_h->type != OGS_GTPU_MSGTYPE_GPDU) {
-        ogs_error("[DROP] Invalid GTPU Type [%d]", gtp_h->type);
-        ogs_log_hexdump(OGS_LOG_ERROR, pkbuf->data, pkbuf->len);
-        goto cleanup;
-    }
-
-    ogs_debug("[RECV] GPU-U from [%s] : TEID[0x%x]",
-            OGS_ADDR(&from, buf), teid);
+    ogs_debug("[RECV] GPU-U Type [%d] from [%s] : TEID[0x%x]",
+            gtp_h->type, OGS_ADDR(&from, buf), teid);
 
     qfi = 0;
     if (gtp_h->flags & OGS_GTPU_FLAGS_E) {
@@ -199,47 +184,86 @@ static void _gtpv1_u_recv_cb(short when, ogs_socket_t fd, void *data)
     }
     ogs_assert(ogs_pkbuf_pull(pkbuf, len));
 
-    ip_h = (struct ip *)pkbuf->data;
-    ogs_assert(ip_h);
+    if (gtp_h->type == OGS_GTPU_MSGTYPE_END_MARKER) {
+        /* Nothing */
 
-    pdr = ogs_pfcp_pdr_find_by_teid_and_qfi(teid, qfi);
-    if (!pdr) {
-        ogs_warn("[DROP] Cannot find PDR : UPF-N3-TEID[0x%x] QFI[%d]",
-                teid, qfi);
-        goto cleanup;
-    }
-    ogs_assert(pdr->sess);
-    sess = UPF_SESS(pdr->sess);
-    ogs_assert(sess);
+    } else if (gtp_h->type == OGS_GTPU_MSGTYPE_ERR_IND) {
+        /* TODO */
 
-    if (ip_h->ip_v == 4 && sess->ipv4)
-        subnet = sess->ipv4->subnet;
-    else if (ip_h->ip_v == 6 && sess->ipv6)
-        subnet = sess->ipv6->subnet;
+    } else if (gtp_h->type == OGS_GTPU_MSGTYPE_GPDU) {
+        int rv;
 
-    if (!subnet) {
-        ogs_error("[DROP] Cannot find subnet V:%d, IPv4:%p, IPv6:%p",
-                ip_h->ip_v, sess->ipv4, sess->ipv6);
-        ogs_log_hexdump(OGS_LOG_ERROR, pkbuf->data, pkbuf->len);
-        goto cleanup;
-    }
+        struct ip *ip_h = NULL;
+        ogs_pfcp_pdr_t *pdr = NULL;
 
-    /* Check IPv6 */
-    if (ogs_app()->parameter.no_slaac == 0 && ip_h->ip_v == 6) {
-        rv = upf_gtp_handle_slaac(sess, pkbuf);
-        if (rv == UPF_GTP_HANDLED) {
+        upf_sess_t *sess = NULL;
+        ogs_pfcp_subnet_t *subnet = NULL;
+        ogs_pfcp_dev_t *dev = NULL;
+
+        ip_h = (struct ip *)pkbuf->data;
+        ogs_assert(ip_h);
+
+        pdr = ogs_pfcp_pdr_find_by_teid_and_qfi(teid, qfi);
+        if (!pdr) {
+            /* TODO : Send Error Indication */
             goto cleanup;
         }
-        ogs_assert(rv == OGS_OK);
-    }
+        ogs_assert(pdr->sess);
+        sess = UPF_SESS(pdr->sess);
+        ogs_assert(sess);
 
-    dev = subnet->dev;
-    ogs_assert(dev);
-    if (ogs_write(dev->fd, pkbuf->data, pkbuf->len) <= 0)
-        ogs_error("ogs_write() failed");
+        if (ip_h->ip_v == 4 && sess->ipv4)
+            subnet = sess->ipv4->subnet;
+        else if (ip_h->ip_v == 6 && sess->ipv6)
+            subnet = sess->ipv6->subnet;
+
+        if (!subnet) {
+#if 0 /* It's redundant log message */
+            ogs_error("[DROP] Cannot find subnet V:%d, IPv4:%p, IPv6:%p",
+                    ip_h->ip_v, sess->ipv4, sess->ipv6);
+            ogs_log_hexdump(OGS_LOG_ERROR, pkbuf->data, pkbuf->len);
+#endif
+            goto cleanup;
+        }
+
+        /* Check IPv6 */
+        if (ogs_app()->parameter.no_slaac == 0 && ip_h->ip_v == 6) {
+            rv = upf_gtp_handle_slaac(sess, pkbuf);
+            if (rv == UPF_GTP_HANDLED) {
+                goto cleanup;
+            }
+            ogs_assert(rv == OGS_OK);
+        }
+
+        dev = subnet->dev;
+        ogs_assert(dev);
+        if (ogs_write(dev->fd, pkbuf->data, pkbuf->len) <= 0)
+            ogs_error("ogs_write() failed");
+    } else {
+        ogs_error("[DROP] Invalid GTPU Type [%d]", gtp_h->type);
+        ogs_log_hexdump(OGS_LOG_ERROR, pkbuf->data, pkbuf->len);
+    }
 
 cleanup:
     ogs_pkbuf_free(pkbuf);
+}
+
+
+int upf_gtp_init(void)
+{
+    ogs_pkbuf_config_t config;
+    memset(&config, 0, sizeof config);
+
+    config.cluster_2048_pool = ogs_app()->pool.packet;
+
+    packet_pool = ogs_pkbuf_pool_create(&config);
+
+    return OGS_OK;
+}
+
+void upf_gtp_final(void)
+{
+    ogs_pkbuf_pool_destroy(packet_pool);
 }
 
 int upf_gtp_open(void)
@@ -355,7 +379,7 @@ static void upf_gtp_handle_multicast(ogs_pkbuf_t *recvbuf)
                     /* PDN IPv6 is avaiable */
                     ogs_pfcp_pdr_t *pdr = NULL;
 
-                    pdr = ogs_pfcp_sess_default_pdr(&sess->pfcp);
+                    pdr = OGS_DEFAULT_DL_PDR(&sess->pfcp);
                     ogs_assert(pdr);
 
                     ogs_pfcp_up_handle_pdr(pdr, recvbuf, &report);
@@ -417,7 +441,7 @@ static int upf_gtp_send_router_advertisement(
     struct nd_opt_prefix_info *prefix = NULL;
 
     ogs_assert(sess);
-    pdr = ogs_pfcp_sess_default_pdr(&sess->pfcp);
+    pdr = OGS_DEFAULT_DL_PDR(&sess->pfcp);
     ogs_assert(pdr);
     far = pdr->far;
     ogs_assert(far);
@@ -429,6 +453,7 @@ static int upf_gtp_send_router_advertisement(
     ogs_assert(dev);
 
     pkbuf = ogs_pkbuf_alloc(NULL, OGS_GTPV1U_5GC_HEADER_LEN+200);
+    ogs_assert(pkbuf);
     ogs_pkbuf_reserve(pkbuf, OGS_GTPV1U_5GC_HEADER_LEN);
     ogs_pkbuf_put(pkbuf, 200);
     pkbuf->len = sizeof *ip6_h + sizeof *advert_h + sizeof *prefix;

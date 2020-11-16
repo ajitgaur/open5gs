@@ -23,11 +23,15 @@ static ogs_app_context_t self;
 
 static int initialized = 0;
 
+static void app_context_prepare(void);
+
 int ogs_app_context_init(void)
 {
     ogs_assert(initialized == 0);
 
     memset(&self, 0, sizeof(ogs_app_context_t));
+
+    app_context_prepare();
 
     initialized = 1;
 
@@ -69,16 +73,16 @@ static void recalculate_pool_size(void)
     self.pool.timer = self.max.ue * MAX_NUM_OF_TIMER;
 
     self.pool.nf = self.max.gnb;
+    self.pool.packet = self.max.ue * OGS_MAX_NUM_OF_PACKET_BUFFER;
 
 #define MAX_NUM_OF_SOCKET       4   /* Num of socket per NF */
     self.pool.socket = self.pool.nf * MAX_NUM_OF_SOCKET;
 
-#define MAX_GTP_XACT_POOL       512
-    self.pool.gtp_xact = MAX_GTP_XACT_POOL;
+#define MAX_NUM_OF_XACT         8
+    self.pool.gtp_xact = self.max.ue * MAX_NUM_OF_XACT;
     self.pool.gtp_node = self.pool.nf;
 
-#define MAX_PFCP_XACT_POOL      512
-    self.pool.pfcp_xact = MAX_PFCP_XACT_POOL;
+    self.pool.pfcp_xact = self.max.ue * MAX_NUM_OF_XACT;
     self.pool.pfcp_node = self.pool.nf;
 
 #define MAX_NUM_OF_NF_SERVICE   16  /* Num of NF Service per NF Instance */
@@ -164,19 +168,16 @@ static void regenerate_all_timer_duration(void)
 #endif
 }
 
-static int app_context_prepare(void)
+static void app_context_prepare(void)
 {
 #define USRSCTP_LOCAL_UDP_PORT      9899
     self.usrsctp.udp_port = USRSCTP_LOCAL_UDP_PORT;
 
-#define MAX_NUM_OF_UE               4096    /* Num of UE per AMF/MME */
+#define MAX_NUM_OF_UE               1024    /* Num of UE per AMF/MME */
 #define MAX_NUM_OF_GNB              32      /* Num of gNB per AMF/MME */
 
     self.max.gnb = MAX_NUM_OF_GNB;
     self.max.ue = MAX_NUM_OF_UE;
-
-#define MAX_NUM_OF_PACKET_POOL      65536
-    self.pool.packet = MAX_NUM_OF_PACKET_POOL;
 
     ogs_pkbuf_default_init(&self.pool.defconfig);
 
@@ -192,12 +193,17 @@ static int app_context_prepare(void)
     /* 86400 seconds = 1 day */
     self.time.subscription.validity_duration = 86400;
 
-    /* Message Wait Duration : 2 seconds */
-    self.time.message.duration = ogs_time_from_sec(2);
+    /*
+     * Message Wait Duration : 10 seconds (Default)
+     *
+     * The paging retry timer is 2 seconds and the retry count is 3.
+     *
+     * It is recomended to set at least 9 seconds to reflect
+     * the paging failure result to GTPv2-C or HTTP2(SBI).
+     */
+    self.time.message.duration = ogs_time_from_sec(10);
 
     regenerate_all_timer_duration();
-
-    return OGS_OK;
 }
  
 static int app_context_validation(void)
@@ -229,9 +235,6 @@ int ogs_app_context_parse_config(void)
 
     document = self.document;
     ogs_assert(document);
-
-    rv = app_context_prepare();
-    if (rv != OGS_OK) return rv;
 
     ogs_yaml_iter_init(&root_iter, document);
     while (ogs_yaml_iter_next(&root_iter)) {
@@ -317,6 +320,9 @@ int ogs_app_context_parse_config(void)
                         ogs_yaml_iter_bool(&parameter_iter);
                 } else if (!strcmp(parameter_key, "no_slaac")) {
                     self.parameter.no_slaac =
+                        ogs_yaml_iter_bool(&parameter_iter);
+                } else if (!strcmp(parameter_key, "use_openair")) {
+                    self.parameter.use_openair =
                         ogs_yaml_iter_bool(&parameter_iter);
                 } else
                     ogs_warn("unknown key `%s`", parameter_key);
@@ -412,10 +418,6 @@ int ogs_app_context_parse_config(void)
                     const char *v = ogs_yaml_iter_value(&pool_iter);
                     if (v)
                         self.pool.defconfig.cluster_big_pool = atoi(v);
-                } else if (!strcmp(pool_key, "packet")) {
-                    const char *v = ogs_yaml_iter_value(&pool_iter);
-                    if (v)
-                        self.pool.packet = atoi(v);
                 } else
                     ogs_warn("unknown key `%s`", pool_key);
             }

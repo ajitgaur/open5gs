@@ -153,18 +153,20 @@ ogs_pkbuf_t *ogs_pfcp_up_build_association_setup_request(uint8_t type)
     req->up_function_features.data = &ogs_pfcp_self()->up_function_features;
     req->up_function_features.len = ogs_pfcp_self()->up_function_features_len;
 
-    i = 0;
-    ogs_list_for_each(&ogs_pfcp_self()->gtpu_resource_list, resource) {
-        ogs_assert(i < OGS_MAX_NUM_OF_GTPU_RESOURCE);
-        ogs_pfcp_tlv_user_plane_ip_resource_information_t *message =
-            &req->user_plane_ip_resource_information[i];
-        ogs_assert(message);
+    if (ogs_pfcp_self()->up_function_features.ftup == 0) {
+        i = 0;
+        ogs_list_for_each(&ogs_pfcp_self()->gtpu_resource_list, resource) {
+            ogs_assert(i < OGS_MAX_NUM_OF_GTPU_RESOURCE);
+            ogs_pfcp_tlv_user_plane_ip_resource_information_t *message =
+                &req->user_plane_ip_resource_information[i];
+            ogs_assert(message);
 
-        message->presence = 1;
-        ogs_pfcp_build_user_plane_ip_resource_info(
-            message, &resource->info, infobuf[i],
-            OGS_PFCP_MAX_USER_PLANE_IP_RESOURCE_INFO_LEN);
-        i++;
+            message->presence = 1;
+            ogs_pfcp_build_user_plane_ip_resource_info(
+                message, &resource->info, infobuf[i],
+                OGS_PFCP_MAX_USER_PLANE_IP_RESOURCE_INFO_LEN);
+            i++;
+        }
     }
 
     pfcp_message.h.type = type;
@@ -209,18 +211,20 @@ ogs_pkbuf_t *ogs_pfcp_up_build_association_setup_response(uint8_t type,
     rsp->up_function_features.data = &ogs_pfcp_self()->up_function_features;
     rsp->up_function_features.len = ogs_pfcp_self()->up_function_features_len;
 
-    i = 0;
-    ogs_list_for_each(&ogs_pfcp_self()->gtpu_resource_list, resource) {
-        ogs_assert(i < OGS_MAX_NUM_OF_GTPU_RESOURCE);
-        ogs_pfcp_tlv_user_plane_ip_resource_information_t *message =
-            &rsp->user_plane_ip_resource_information[i];
-        ogs_assert(message);
+    if (ogs_pfcp_self()->up_function_features.ftup == 0) {
+        i = 0;
+        ogs_list_for_each(&ogs_pfcp_self()->gtpu_resource_list, resource) {
+            ogs_assert(i < OGS_MAX_NUM_OF_GTPU_RESOURCE);
+            ogs_pfcp_tlv_user_plane_ip_resource_information_t *message =
+                &rsp->user_plane_ip_resource_information[i];
+            ogs_assert(message);
 
-        message->presence = 1;
-        ogs_pfcp_build_user_plane_ip_resource_info(
-            message, &resource->info, infobuf[i],
-            OGS_PFCP_MAX_USER_PLANE_IP_RESOURCE_INFO_LEN);
-        i++;
+            message->presence = 1;
+            ogs_pfcp_build_user_plane_ip_resource_info(
+                message, &resource->info, infobuf[i],
+                OGS_PFCP_MAX_USER_PLANE_IP_RESOURCE_INFO_LEN);
+            i++;
+        }
     }
 
     pfcp_message.h.type = type;
@@ -253,7 +257,6 @@ void ogs_pfcp_build_create_pdr(
     ogs_pfcp_tlv_create_pdr_t *message, int i, ogs_pfcp_pdr_t *pdr)
 {
     ogs_pfcp_far_t *far = NULL;
-    ogs_pfcp_sess_t *pfcp_sess = NULL;
     ogs_pfcp_sdf_filter_t pfcp_sdf_filter[OGS_MAX_NUM_OF_RULE];
     int j = 0;
     int len = 0;
@@ -261,8 +264,6 @@ void ogs_pfcp_build_create_pdr(
     ogs_assert(message);
 
     ogs_assert(pdr);
-    pfcp_sess = pdr->sess;
-    ogs_assert(pfcp_sess);
 
     far = pdr->far;
     ogs_assert(far);
@@ -344,6 +345,29 @@ void ogs_pfcp_build_create_pdr(
     }
 }
 
+void ogs_pfcp_build_created_pdr(
+    ogs_pfcp_tlv_created_pdr_t *message, int i, ogs_pfcp_pdr_t *pdr)
+{
+    ogs_assert(message);
+
+    ogs_assert(pdr);
+
+    message->presence = 1;
+    message->pdr_id.presence = 1;
+    message->pdr_id.u16 = pdr->id;
+
+    if (ogs_pfcp_self()->up_function_features.ftup) {
+        if (pdr->f_teid_len) {
+            memcpy(&pdrbuf[i].f_teid, &pdr->f_teid, pdr->f_teid_len);
+            pdrbuf[i].f_teid.teid = htobe32(pdr->f_teid.teid);
+
+            message->local_f_teid.presence = 1;
+            message->local_f_teid.data = &pdrbuf[i].f_teid;
+            message->local_f_teid.len = pdr->f_teid_len;
+        }
+    }
+}
+
 void ogs_pfcp_build_update_pdr(
     ogs_pfcp_tlv_update_pdr_t *message, int i, ogs_pfcp_pdr_t *pdr)
 {
@@ -412,12 +436,8 @@ static struct {
 void ogs_pfcp_build_create_far(
     ogs_pfcp_tlv_create_far_t *message, int i, ogs_pfcp_far_t *far)
 {
-    ogs_pfcp_sess_t *pfcp_sess = NULL;
-
     ogs_assert(message);
     ogs_assert(far);
-    pfcp_sess = far->sess;
-    ogs_assert(pfcp_sess);
 
     message->presence = 1;
     message->far_id.presence = 1;
@@ -635,6 +655,15 @@ ogs_pkbuf_t *ogs_pfcp_build_session_report_request(
             req->downlink_data_report.
                 downlink_data_service_information.len = info_len;
         }
+    }
+
+    if (report->error_indication.remote_f_teid_len) {
+        req->error_indication_report.presence = 1;
+        req->error_indication_report.remote_f_teid.presence = 1;
+        req->error_indication_report.remote_f_teid.data =
+            &report->error_indication.remote_f_teid;
+        req->error_indication_report.remote_f_teid.len =
+            report->error_indication.remote_f_teid_len;
     }
 
     pfcp_message.h.type = type;

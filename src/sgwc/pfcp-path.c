@@ -18,9 +18,6 @@
  */
 
 #include "pfcp-path.h"
-#if 0
-#include "n4-build.h"
-#endif
 
 static void pfcp_node_fsm_init(ogs_pfcp_node_t *node, bool try_to_assoicate)
 {
@@ -71,6 +68,7 @@ static void pfcp_recv_cb(short when, ogs_socket_t fd, void *data)
     ogs_assert(fd != INVALID_SOCKET);
 
     pkbuf = ogs_pkbuf_alloc(NULL, OGS_MAX_SDU_LEN);
+    ogs_assert(pkbuf);
     ogs_pkbuf_put(pkbuf, OGS_MAX_SDU_LEN);
 
     size = ogs_recvfrom(fd, pkbuf->data, pkbuf->len, 0, &from);
@@ -94,7 +92,10 @@ static void pfcp_recv_cb(short when, ogs_socket_t fd, void *data)
         rsp.type = OGS_PFCP_VERSION_NOT_SUPPORTED_RESPONSE_TYPE;
         rsp.length = htobe16(4);
         rsp.sqn_only = h->sqn_only;
-        ogs_sendto(fd, &rsp, 8, 0, &from);
+        if (ogs_sendto(fd, &rsp, 8, 0, &from) < 0) {
+            ogs_log_message(OGS_LOG_ERROR, ogs_socket_errno,
+                    "ogs_sendto() failed");
+        }
         ogs_pkbuf_free(pkbuf);
 
         return;
@@ -217,8 +218,10 @@ void sgwc_pfcp_send_session_establishment_request(
             sess->pfcp_node, &h, sxabuf, sess_timeout, sess);
     ogs_expect_or_return(xact);
     xact->assoc_xact = gtp_xact;
-    if (gtpbuf)
+    if (gtpbuf) {
         xact->gtpbuf = ogs_pkbuf_copy(gtpbuf);
+        ogs_assert(xact->gtpbuf);
+    }
 
     rv = ogs_pfcp_xact_commit(xact);
     ogs_expect(rv == OGS_OK);
@@ -247,8 +250,10 @@ void sgwc_pfcp_send_sess_modification_request(
     ogs_expect_or_return(xact);
     xact->assoc_xact = gtp_xact;
     xact->modify_flags = flags | OGS_PFCP_MODIFY_SESSION;
-    if (gtpbuf)
+    if (gtpbuf) {
         xact->gtpbuf = ogs_pkbuf_copy(gtpbuf);
+        ogs_assert(xact->gtpbuf);
+    }
 
     rv = ogs_pfcp_xact_commit(xact);
     ogs_expect(rv == OGS_OK);
@@ -280,8 +285,10 @@ void sgwc_pfcp_send_bearer_modification_request(
     ogs_expect_or_return(xact);
     xact->assoc_xact = gtp_xact;
     xact->modify_flags = flags;
-    if (gtpbuf)
+    if (gtpbuf) {
         xact->gtpbuf = ogs_pkbuf_copy(gtpbuf);
+        ogs_assert(xact->gtpbuf);
+    }
 
     rv = ogs_pfcp_xact_commit(xact);
     ogs_expect(rv == OGS_OK);
@@ -308,8 +315,10 @@ void sgwc_pfcp_send_session_deletion_request(
             sess->pfcp_node, &h, sxabuf, sess_timeout, sess);
     ogs_expect_or_return(xact);
     xact->assoc_xact = gtp_xact;
-    if (gtpbuf)
+    if (gtpbuf) {
         xact->gtpbuf = ogs_pkbuf_copy(gtpbuf);
+        ogs_assert(xact->gtpbuf);
+    }
 
     rv = ogs_pfcp_xact_commit(xact);
     ogs_expect(rv == OGS_OK);

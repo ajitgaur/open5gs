@@ -79,6 +79,7 @@ typedef struct ogs_pfcp_xact_s {
 #define OGS_PFCP_MODIFY_ACTIVATE ((uint64_t)1<<8)
 #define OGS_PFCP_MODIFY_DEACTIVATE ((uint64_t)1<<9)
 #define OGS_PFCP_MODIFY_END_MARKER ((uint64_t)1<<10)
+#define OGS_PFCP_MODIFY_ERROR_INDICATION ((uint64_t)1<<11)
     uint64_t        modify_flags;
 
 #define OGS_PFCP_DELETE_TRIGGER_UE_REQUESTED 1
@@ -98,6 +99,7 @@ ogs_pfcp_xact_t *ogs_pfcp_xact_local_create(ogs_pfcp_node_t *node,
         void (*cb)(ogs_pfcp_xact_t *xact, void *data), void *data);
 ogs_pfcp_xact_t *ogs_pfcp_xact_remote_create(
         ogs_pfcp_node_t *node, uint32_t sqn);
+ogs_pfcp_xact_t *ogs_pfcp_xact_cycle(ogs_pfcp_xact_t *xact);
 void ogs_pfcp_xact_delete_all(ogs_pfcp_node_t *node);
 
 int ogs_pfcp_xact_update_tx(ogs_pfcp_xact_t *xact,

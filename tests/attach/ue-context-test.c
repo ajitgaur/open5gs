@@ -232,14 +232,6 @@ static void test1_func(abts_case *tc, void *data)
     ABTS_PTR_NOTNULL(tc, sendbuf);
     rv = testenb_s1ap_send(s1ap, sendbuf);
 
-    /* Send UE Context Release Request */
-    sendbuf = test_s1ap_build_ue_context_release_request(test_ue,
-            S1AP_Cause_PR_radioNetwork,
-            S1AP_CauseRadioNetwork_radio_connection_with_ue_lost);
-    ABTS_PTR_NOTNULL(tc, sendbuf);
-    rv = testenb_s1ap_send(s1ap, sendbuf);
-    ABTS_INT_EQUAL(tc, OGS_OK, rv);
-
     /* Receive UE Context Release Command */
     recvbuf = testenb_s1ap_read(s1ap);
     ABTS_PTR_NOTNULL(tc, recvbuf);
@@ -286,6 +278,9 @@ static void test2_func(abts_case *tc, void *data)
     test_ue_t *test_ue = NULL;
     test_sess_t *sess = NULL;
     test_bearer_t *bearer = NULL;
+
+    uint32_t enb_ue_s1ap_id;
+    uint64_t mme_ue_s1ap_id;
 
     const char *_k_string = "465b5ce8b199b49faa5f0a2ee238a6bc";
     uint8_t k[OGS_KEY_LEN];
@@ -530,6 +525,21 @@ static void test2_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Receive OLD UE Context Release Command */
+    enb_ue_s1ap_id = test_ue->enb_ue_s1ap_id;
+
+    recvbuf = testenb_s1ap_read(s1ap);
+    ABTS_PTR_NOTNULL(tc, recvbuf);
+    tests1ap_recv(test_ue, recvbuf);
+
+    /* Send OLD UE Context Release Complete */
+    sendbuf = test_s1ap_build_ue_context_release_complete(test_ue);
+    ABTS_PTR_NOTNULL(tc, sendbuf);
+    rv = testenb_s1ap_send(s1ap, sendbuf);
+    ABTS_INT_EQUAL(tc, OGS_OK, rv);
+
+    test_ue->enb_ue_s1ap_id = enb_ue_s1ap_id;
+
     /* Receive Authentication Request */
     recvbuf = testenb_s1ap_read(s1ap);
     ABTS_PTR_NOTNULL(tc, recvbuf);
@@ -576,24 +586,9 @@ static void test2_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
-    /* Send Attach Complete + Activate default EPS bearer cotext accept */
-    test_ue->nr_cgi.cell_id = 0x1234502;
-    bearer = test_bearer_find_by_ue_ebi(test_ue, 5);
-    ogs_assert(bearer);
-    esmbuf = testesm_build_activate_default_eps_bearer_context_accept(
-            bearer, false);
-    ABTS_PTR_NOTNULL(tc, esmbuf);
-    emmbuf = testemm_build_attach_complete(test_ue, esmbuf);
-    ABTS_PTR_NOTNULL(tc, emmbuf);
-    sendbuf = test_s1ap_build_uplink_nas_transport(test_ue, emmbuf);
-    ABTS_PTR_NOTNULL(tc, sendbuf);
-    rv = testenb_s1ap_send(s1ap, sendbuf);
-    ABTS_INT_EQUAL(tc, OGS_OK, rv);
-
-    /* Receive EMM information */
-    recvbuf = testenb_s1ap_read(s1ap);
-    ABTS_PTR_NOTNULL(tc, recvbuf);
-    tests1ap_recv(test_ue, recvbuf);
+    /* GUTI Not Present
+     * SKIP Send Attach Complete + Activate default EPS bearer cotext accept
+     * SKIP Receive EMM information */
 
     /* Send Initial context setup failure */
     sendbuf = test_s1ap_build_initial_context_setup_failure(test_ue,
@@ -649,6 +644,9 @@ static void test3_func(abts_case *tc, void *data)
     test_sess_t *sess = NULL;
     test_bearer_t *bearer = NULL;
 
+    uint32_t enb_ue_s1ap_id;
+    uint64_t mme_ue_s1ap_id;
+
     const char *_k_string = "465b5ce8b199b49faa5f0a2ee238a6bc";
     uint8_t k[OGS_KEY_LEN];
     const char *_opc_string = "e8ed289deba952e4283b54e88e6183ca";
@@ -892,6 +890,21 @@ static void test3_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+    /* Receive OLD UE Context Release Command */
+    enb_ue_s1ap_id = test_ue->enb_ue_s1ap_id;
+
+    recvbuf = testenb_s1ap_read(s1ap);
+    ABTS_PTR_NOTNULL(tc, recvbuf);
+    tests1ap_recv(test_ue, recvbuf);
+
+    /* Send OLD UE Context Release Complete */
+    sendbuf = test_s1ap_build_ue_context_release_complete(test_ue);
+    ABTS_PTR_NOTNULL(tc, sendbuf);
+    rv = testenb_s1ap_send(s1ap, sendbuf);
+    ABTS_INT_EQUAL(tc, OGS_OK, rv);
+
+    test_ue->enb_ue_s1ap_id = enb_ue_s1ap_id;
+
     /* Receive Authentication Request */
     recvbuf = testenb_s1ap_read(s1ap);
     ABTS_PTR_NOTNULL(tc, recvbuf);
@@ -938,24 +951,9 @@ static void test3_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
-    /* Send Attach Complete + Activate default EPS bearer cotext accept */
-    test_ue->nr_cgi.cell_id = 0x1234502;
-    bearer = test_bearer_find_by_ue_ebi(test_ue, 5);
-    ogs_assert(bearer);
-    esmbuf = testesm_build_activate_default_eps_bearer_context_accept(
-            bearer, false);
-    ABTS_PTR_NOTNULL(tc, esmbuf);
-    emmbuf = testemm_build_attach_complete(test_ue, esmbuf);
-    ABTS_PTR_NOTNULL(tc, emmbuf);
-    sendbuf = test_s1ap_build_uplink_nas_transport(test_ue, emmbuf);
-    ABTS_PTR_NOTNULL(tc, sendbuf);
-    rv = testenb_s1ap_send(s1ap, sendbuf);
-    ABTS_INT_EQUAL(tc, OGS_OK, rv);
-
-    /* Receive EMM information */
-    recvbuf = testenb_s1ap_read(s1ap);
-    ABTS_PTR_NOTNULL(tc, recvbuf);
-    tests1ap_recv(test_ue, recvbuf);
+    /* GUTI Not Present
+     * SKIP Send Attach Complete + Activate default EPS bearer cotext accept
+     * SKIP Receive EMM information */
 
     /* Send UE Context Release Request */
     sendbuf = test_s1ap_build_ue_context_release_request(test_ue,
@@ -984,6 +982,7 @@ static void test3_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
+#if 0 /* WITHOUT checking NO active EPS bearers */
     /* Receive Initial Context Setup Request */
     recvbuf = testenb_s1ap_read(s1ap);
     ABTS_PTR_NOTNULL(tc, recvbuf);
@@ -996,13 +995,6 @@ static void test3_func(abts_case *tc, void *data)
     ABTS_PTR_NOTNULL(tc, sendbuf);
     rv = testenb_s1ap_send(s1ap, sendbuf);
 
-    /* Send UE Context Release Request */
-    sendbuf = test_s1ap_build_ue_context_release_request(test_ue,
-            S1AP_Cause_PR_radioNetwork, S1AP_CauseRadioNetwork_user_inactivity);
-    ABTS_PTR_NOTNULL(tc, sendbuf);
-    rv = testenb_s1ap_send(s1ap, sendbuf);
-    ABTS_INT_EQUAL(tc, OGS_OK, rv);
-
     /* Receive UE Context Release Command */
     recvbuf = testenb_s1ap_read(s1ap);
     ABTS_PTR_NOTNULL(tc, recvbuf);
@@ -1011,11 +1003,38 @@ static void test3_func(abts_case *tc, void *data)
     /* Send Service Request */
     emmbuf = testemm_build_service_request(test_ue);
     ABTS_PTR_NOTNULL(tc, emmbuf);
+#if 1
+    /*
+     * In s1ap_handle_initial_context_setup_failure(),
+     * Use mme_send_release_access_bearer_or_ue_context_release(enb_ue);
+     */
+    {
+        unsigned char *data = emmbuf->data;
+        ogs_assert(data);
+        data[3]++;
+    }
+#endif
     sendbuf = test_s1ap_build_initial_ue_message(
             test_ue, emmbuf, S1AP_RRC_Establishment_Cause_mo_Data, true);
     ABTS_PTR_NOTNULL(tc, sendbuf);
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
+
+    /* Receive OLD UE Context Release Command */
+    enb_ue_s1ap_id = test_ue->enb_ue_s1ap_id;
+
+    recvbuf = testenb_s1ap_read(s1ap);
+    ABTS_PTR_NOTNULL(tc, recvbuf);
+    tests1ap_recv(test_ue, recvbuf);
+
+    /* Send OLD UE Context Release Complete */
+    sendbuf = test_s1ap_build_ue_context_release_complete(test_ue);
+    ABTS_PTR_NOTNULL(tc, sendbuf);
+    rv = testenb_s1ap_send(s1ap, sendbuf);
+    ABTS_INT_EQUAL(tc, OGS_OK, rv);
+
+    test_ue->enb_ue_s1ap_id = enb_ue_s1ap_id;
+#endif
 
     /* Receive Service Reject */
     recvbuf = testenb_s1ap_read(s1ap);
@@ -1033,7 +1052,7 @@ static void test3_func(abts_case *tc, void *data)
     rv = testenb_s1ap_send(s1ap, sendbuf);
     ABTS_INT_EQUAL(tc, OGS_OK, rv);
 
-    ogs_msleep(100);
+    ogs_msleep(300);
 
     /********** Remove Subscriber in Database */
     doc = BCON_NEW("imsi", BCON_UTF8(test_ue->imsi));
@@ -1052,6 +1071,7 @@ static void test3_func(abts_case *tc, void *data)
 
     test_ue_remove(test_ue);
 }
+
 abts_suite *test_ue_context(abts_suite *suite)
 {
     suite = ADD_SUITE(suite)

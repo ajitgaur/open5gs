@@ -72,16 +72,16 @@ static void test1_func(abts_case *tc, void *data)
                   "},"
                   "\"flow\" : ["
                     "{ \"direction\" : 2,"
-                      "\"description\" : \"permit out udp from any 1-65535 to 10.200.136.98/32 23454\","
+                      "\"description\" : \"permit out udp from 10.200.136.98/32 23454 to any 1-65535\","
                       "\"_id\" : { \"$oid\" : \"599eb929c850caabcbfdcd31\" } },"
                     "{ \"direction\" : 1,"
-                      "\"description\" : \"permit out udp from any 50020 to 10.200.136.98/32 1-65535\","
+                      "\"description\" : \"permit out udp from 10.200.136.98/32 1-65535 to any 50020\","
                       "\"_id\" : { \"$oid\" : \"599eb929c850caabcbfdcd30\" } },"
                     "{ \"direction\" : 2,"
-                      "\"description\" : \"permit out udp from any 1-65535 to 10.200.136.98/32 23455\","
+                      "\"description\" : \"permit out udp from 10.200.136.98/32 23455 to any 1-65535\","
                       "\"_id\" : { \"$oid\" : \"599eb929c850caabcbfdcd2f\" } },"
                     "{ \"direction\" : 1,"
-                      "\"description\" : \"permit out udp from any 50021 to 10.200.136.98/32 1-65535\","
+                      "\"description\" : \"permit out udp from 10.200.136.98/32 1-65535 to any 50021\","
                       "\"_id\" : { \"$oid\" : \"599eb929c850caabcbfdcd2e\" } }"
                   "]"
               "}"
@@ -338,6 +338,26 @@ static void test1_func(abts_case *tc, void *data)
     recvbuf = test_gtpu_read(gtpu);
     ABTS_PTR_NOTNULL(tc, recvbuf);
     ogs_pkbuf_free(recvbuf);
+
+    /* Send UE Context Release Request */
+    sendbuf = test_s1ap_build_ue_context_release_request(test_ue,
+            S1AP_Cause_PR_radioNetwork, S1AP_CauseRadioNetwork_user_inactivity);
+    ABTS_PTR_NOTNULL(tc, sendbuf);
+    rv = testenb_s1ap_send(s1ap, sendbuf);
+    ABTS_INT_EQUAL(tc, OGS_OK, rv);
+
+    /* Receive UE Context Release Command */
+    recvbuf = testenb_s1ap_read(s1ap);
+    ABTS_PTR_NOTNULL(tc, recvbuf);
+    tests1ap_recv(test_ue, recvbuf);
+
+    /* Send UE Context Release Complete */
+    sendbuf = test_s1ap_build_ue_context_release_complete(test_ue);
+    ABTS_PTR_NOTNULL(tc, sendbuf);
+    rv = testenb_s1ap_send(s1ap, sendbuf);
+    ABTS_INT_EQUAL(tc, OGS_OK, rv);
+
+    ogs_msleep(300);
 
     /********** Remove Subscriber in Database */
     doc = BCON_NEW("imsi", BCON_UTF8(test_ue->imsi));

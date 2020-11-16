@@ -92,7 +92,25 @@ int esm_handle_pdn_connectivity_request(mme_bearer_t *bearer,
     }
 
     if (sess->pdn) {
+        mme_bearer_t *default_bearer = NULL;
+        mme_bearer_t *dedicated_bearer = NULL, *next_dedicated_bearer = NULL;
+
         ogs_debug("    APN[%s]", sess->pdn->apn);
+
+        default_bearer = mme_default_bearer_in_sess(sess);
+        if (default_bearer) {
+            dedicated_bearer = mme_bearer_next(default_bearer);
+            while (dedicated_bearer) {
+                next_dedicated_bearer = mme_bearer_next(dedicated_bearer);
+
+                ogs_warn("Dedicated-Bearer[%d] removed forcely",
+                        dedicated_bearer->ebi);
+                mme_bearer_remove(dedicated_bearer);
+
+                dedicated_bearer = next_dedicated_bearer;
+            }
+        }
+
         mme_gtp_send_create_session_request(sess);
     } else {
         nas_eps_send_pdn_connectivity_reject(
@@ -129,6 +147,7 @@ int esm_handle_information_response(mme_sess_t *sess,
 
     if (sess->pdn) {
         ogs_debug("    APN[%s]", sess->pdn->apn);
+
         if (SESSION_CONTEXT_IS_AVAILABLE(mme_ue)) {
             mme_csmap_t *csmap = mme_csmap_find_by_tai(&mme_ue->tai);
             mme_ue->csmap = csmap;
@@ -136,6 +155,23 @@ int esm_handle_information_response(mme_sess_t *sess,
             if (csmap) {
                 sgsap_send_location_update_request(mme_ue);
             } else {
+
+                if (sess->pdn->paa.pdn_type == OGS_GTP_PDN_TYPE_IPV4) {
+                    /* Nothing */
+                } else if (sess->pdn->paa.pdn_type == OGS_GTP_PDN_TYPE_IPV6) {
+                    /* Nothing */
+                } else if (sess->pdn->paa.pdn_type == OGS_GTP_PDN_TYPE_IPV4V6) {
+                    /* Nothing */
+                } else {
+                    ogs_error("Unknown PDN[%s] Type %u:%u",
+                            sess->pdn->apn,
+                            sess->pdn->pdn_type,
+                            sess->pdn->paa.pdn_type);
+                    nas_eps_send_pdn_connectivity_reject(
+                            sess, ESM_CAUSE_UNKNOWN_PDN_TYPE);
+                    return OGS_ERROR;
+                }
+
                 nas_eps_send_attach_accept(mme_ue);
             }
         } else {

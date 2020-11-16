@@ -45,7 +45,7 @@ ogs_pkbuf_t *emm_build_attach_accept(
     ogs_assert(mme_ue);
     ogs_assert(esmbuf);
 
-    ogs_debug("[EMM] Attach accept");
+    ogs_debug("Attach accept");
 
     memset(&message, 0, sizeof(message));
     message.h.security_header_type = 
@@ -107,7 +107,11 @@ ogs_pkbuf_t *emm_build_attach_accept(
 
     attach_accept->presencemask |= 
         OGS_NAS_EPS_ATTACH_ACCEPT_EPS_NETWORK_FEATURE_SUPPORT_PRESENT;
-    eps_network_feature_support->length = 2;
+    if (ogs_app()->parameter.use_openair == false) {
+        eps_network_feature_support->length = 2;
+    } else {
+        eps_network_feature_support->length = 1;
+    }
     eps_network_feature_support->ims_voice_over_ps_session_in_s1_mode = 1;
     eps_network_feature_support->extended_protocol_configuration_options = 1;
 
@@ -183,15 +187,13 @@ ogs_pkbuf_t *emm_build_identity_request(mme_ue_t *mme_ue)
     return ogs_nas_eps_plain_encode(&message);
 }
 
-ogs_pkbuf_t *emm_build_authentication_request(mme_ue_t *mme_ue,
-        ogs_diam_e_utran_vector_t *e_utran_vector)
+ogs_pkbuf_t *emm_build_authentication_request(mme_ue_t *mme_ue)
 {
     ogs_nas_eps_message_t message;
     ogs_nas_eps_authentication_request_t *authentication_request = 
         &message.emm.authentication_request;
 
     ogs_assert(mme_ue);
-    ogs_assert(e_utran_vector);
 
     memset(&message, 0, sizeof(message));
     message.emm.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
@@ -201,9 +203,9 @@ ogs_pkbuf_t *emm_build_authentication_request(mme_ue_t *mme_ue,
     authentication_request->nas_key_set_identifierasme.value =
         mme_ue->nas_eps.ksi;
     memcpy(authentication_request->authentication_parameter_rand.rand,
-            e_utran_vector->rand, OGS_RAND_LEN);
+            mme_ue->rand, OGS_RAND_LEN);
     memcpy(authentication_request->authentication_parameter_autn.autn,
-            e_utran_vector->autn, OGS_AUTN_LEN);
+            mme_ue->autn, OGS_AUTN_LEN);
     authentication_request->authentication_parameter_autn.length = 
             OGS_AUTN_LEN;
 
@@ -303,10 +305,30 @@ ogs_pkbuf_t *emm_build_security_mode_command(mme_ue_t *mme_ue)
     imeisv_request->type = OGS_NAS_IMEISV_TYPE;
     imeisv_request->value = OGS_NAS_IMEISV_REQUESTED;
 
-    security_mode_command->presencemask |=
-        OGS_NAS_EPS_SECURITY_MODE_COMMAND_HASHMME_PRESENT;
-    hashmme->length = OGS_HASH_MME_LEN;
-    memcpy(hashmme->value, mme_ue->hash_mme, hashmme->length);
+    /*
+     * TS24.301
+     * 5.4.3.2 NAS security mode control initiation by the network
+     *
+     * If, during an ongoing attach or tracking area updating procedure,
+     * the MME is initiating a SECURITY MODE COMMAND (i.e. after receiving
+     * the ATTACH REQUEST or TRACKING AREA UPDATE REQUEST message,
+     * but before sending a response to that message) and the ATTACH REQUEST
+     * or TRACKING AREA UPDATE REQUEST message is received without integrity
+     * protection or does not successfully pass the integrity check at the MME,
+     * the MME shall calculate the HASH MME of the entire plain ATTACH REQUEST
+     * or TRACKING AREA UPDATE REQUEST message as described
+     * in 3GPP TS 33.401 [19] and shall include the HASH MME
+     * in the SECURITY MODE COMMAND message
+     *
+     * However, Openair UE does not support HashMME. For user convenience,
+     * we added a way not to include HashMME through the configuration file.
+     */
+    if (ogs_app()->parameter.use_openair == false) {
+        security_mode_command->presencemask |=
+            OGS_NAS_EPS_SECURITY_MODE_COMMAND_HASHMME_PRESENT;
+        hashmme->length = OGS_HASH_MME_LEN;
+        memcpy(hashmme->value, mme_ue->hash_mme, hashmme->length);
+    }
 
     if (mme_ue->ue_additional_security_capability.length) {
         security_mode_command->presencemask |=
@@ -342,7 +364,7 @@ ogs_pkbuf_t *emm_build_detach_accept(mme_ue_t *mme_ue)
         OGS_NAS_SECURITY_HEADER_INTEGRITY_PROTECTED_AND_CIPHERED;
     message.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
 
-    ogs_debug("[EMM] Detach accept");
+    ogs_debug("Detach accept");
     ogs_debug("    IMSI[%s]", mme_ue->imsi_bcd);
 
     message.emm.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
@@ -370,7 +392,16 @@ ogs_pkbuf_t *emm_build_tau_accept(mme_ue_t *mme_ue)
     message.emm.h.protocol_discriminator = OGS_NAS_PROTOCOL_DISCRIMINATOR_EMM;
     message.emm.h.message_type = OGS_NAS_EPS_TRACKING_AREA_UPDATE_ACCEPT;
 
-    tau_accept->eps_update_result.result = mme_ue->nas_eps.update.value;
+    if (mme_ue->nas_eps.update.value ==
+            OGS_NAS_EPS_UPDATE_TYPE_COMBINED_TA_LA_UPDATING ||
+        mme_ue->nas_eps.update.value ==
+            OGS_NAS_EPS_UPDATE_TYPE_COMBINED_TA_LA_UPDATING_WITH_IMSI_ATTACH) {
+        tau_accept->eps_update_result.result =
+            OGS_NAS_EPS_UPDATE_RESULT_COMBINED_TA_LA_UPDATED;
+    } else {
+        tau_accept->eps_update_result.result =
+            OGS_NAS_EPS_UPDATE_RESULT_TA_UPDATED;
+    }
 
     /* Set T3412 */
     tau_accept->presencemask |=
@@ -404,7 +435,7 @@ ogs_pkbuf_t *emm_build_tau_accept(mme_ue_t *mme_ue)
     while (sess) {
         mme_bearer_t *bearer = mme_bearer_first(sess);
         while (bearer) {
-            switch (*(bearer->ebi)) {
+            switch (bearer->ebi) {
             case 5: tau_accept->eps_bearer_context_status.ebi5 = 1; break;
             case 6: tau_accept->eps_bearer_context_status.ebi6 = 1; break;
             case 7: tau_accept->eps_bearer_context_status.ebi7 = 1; break;
@@ -441,7 +472,11 @@ ogs_pkbuf_t *emm_build_tau_accept(mme_ue_t *mme_ue)
     /* Set EPS network feature support */
     tau_accept->presencemask |=
         OGS_NAS_EPS_TRACKING_AREA_UPDATE_ACCEPT_EPS_NETWORK_FEATURE_SUPPORT_PRESENT;
-    tau_accept->eps_network_feature_support.length = 1;
+    if (ogs_app()->parameter.use_openair == false) {
+        tau_accept->eps_network_feature_support.length = 2;
+    } else {
+        tau_accept->eps_network_feature_support.length = 1;
+    }
     tau_accept->eps_network_feature_support.
         ims_voice_over_ps_session_in_s1_mode = 1;
     tau_accept->eps_network_feature_support.
@@ -459,7 +494,7 @@ ogs_pkbuf_t *emm_build_tau_reject(
 
     ogs_assert(mme_ue);
 
-    ogs_debug("[EMM] Tracking area update reject");
+    ogs_debug("Tracking area update reject");
     ogs_debug("    IMSI[%s] Cause[%d]",
             MME_UE_HAVE_IMSI(mme_ue) ? mme_ue->imsi_bcd : "Unknown", emm_cause);
 
@@ -480,7 +515,7 @@ ogs_pkbuf_t *emm_build_service_reject(
 
     ogs_assert(mme_ue);
 
-    ogs_debug("[EMM] Service reject");
+    ogs_debug("Service reject");
     ogs_debug("    Cause[%d]", emm_cause);
 
     memset(&message, 0, sizeof(message));

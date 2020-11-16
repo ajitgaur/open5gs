@@ -120,10 +120,7 @@ typedef struct amf_gnb_s {
     ogs_fsm_t       sm;         /* A state machine */
 
     uint32_t        gnb_id;     /* gNB_ID received from gNB */
-    int             sock_type;  /* SOCK_STREAM or SOCK_SEQPACKET */
-    ogs_sock_t      *sock;      /* gNB NGAP Socket */
-    ogs_sockaddr_t  *addr;      /* gNB NGAP Address */
-    ogs_poll_t      *poll;      /* gNB NGAP Poll */
+    ogs_sctp_sock_t sctp;       /* SCTP socket */
 
     struct {
         bool ng_setup_success;  /* gNB NGAP Setup complete successfuly */
@@ -131,7 +128,6 @@ typedef struct amf_gnb_s {
 
     uint16_t        max_num_of_ostreams;/* SCTP Max num of outbound streams */
     uint16_t        ostream_id;         /* gnb_ostream_id generator */
-
 
     uint8_t         num_of_supported_ta_list;
     struct {
@@ -172,6 +168,9 @@ struct ran_ue_s {
         ogs_5gs_tai_t   tai;
         ogs_nr_cgi_t    nr_cgi;
     } saved;
+
+    /* NG Holding timer for removing this context */
+    ogs_timer_t     *t_ng_holding;
 
     /* Store by UE Context Release Command
      * Retrieve by UE Context Release Complete */
@@ -339,8 +338,10 @@ struct amf_ue_s {
     ogs_bitrate_t   subscribed_ue_ambr; /* UE-AMBR */
 
 #define CM_CONNECTED(__aMF) \
-    ((__aMF) && ((__aMF)->ran_ue != NULL))
-#define CM_IDLE(__aMF) (!ECM_CONNECTED(__aMF))
+    ((__aMF) && ((__aMF)->ran_ue != NULL) && ran_ue_cycle((__aMF)->ran_ue))
+#define CM_IDLE(__aMF) \
+    ((__aMF) && \
+     (((__aMF)->ran_ue == NULL) || (ran_ue_cycle((__aMF)->ran_ue) == NULL)))
     /* NG UE context */
     ran_ue_t        *ran_ue;
 
@@ -472,18 +473,19 @@ int amf_gnb_sock_type(ogs_sock_t *sock);
 
 ran_ue_t *ran_ue_add(amf_gnb_t *gnb, uint32_t ran_ue_ngap_id);
 void ran_ue_remove(ran_ue_t *ran_ue);
-void ran_ue_remove_in_gnb(amf_gnb_t *gnb);
 void ran_ue_switch_to_gnb(ran_ue_t *ran_ue, amf_gnb_t *new_gnb);
 ran_ue_t *ran_ue_find_by_ran_ue_ngap_id(
         amf_gnb_t *gnb, uint32_t ran_ue_ngap_id);
 ran_ue_t *ran_ue_find(uint32_t index);
 ran_ue_t *ran_ue_find_by_amf_ue_ngap_id(uint64_t amf_ue_ngap_id);
-ran_ue_t *ran_ue_first_in_gnb(amf_gnb_t *gnb);
-ran_ue_t *ran_ue_next_in_gnb(ran_ue_t *ran_ue);
+ran_ue_t *ran_ue_cycle(ran_ue_t *ran_ue);
 
 amf_ue_t *amf_ue_add(ran_ue_t *ran_ue);
 void amf_ue_remove(amf_ue_t *amf_ue);
 void amf_ue_remove_all(void);
+
+void amf_ue_fsm_init(amf_ue_t *amf_ue);
+void amf_ue_fsm_fini(amf_ue_t *amf_ue);
 
 amf_ue_t *amf_ue_find_by_guti(ogs_nas_5gs_guti_t *nas_guti);
 amf_ue_t *amf_ue_find_by_teid(uint32_t teid);
